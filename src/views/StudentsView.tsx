@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye } from 'lucide-react';
 import type { Student, ScholarshipType, ToastPush, Transaction } from '@/types';
 import { formatBs, formatDate } from '@/lib/format';
 import Modal from '@/components/ui/Modal';
+import { supabase } from '../lib/supabase'; 
 
 interface StudentsViewProps {
   students: Student[];
@@ -18,6 +19,7 @@ interface ExportRow {
 }
 
 const PAGE_SIZE = 12;
+const COMPROBANTES_BUCKET = 'comprobantes';
 
 function getPaymentYear(payment: Transaction): string {
   return new Date(payment.fecha).getFullYear().toString();
@@ -25,6 +27,26 @@ function getPaymentYear(payment: Transaction): string {
 
 function paymentMatchesStudent(payment: Transaction, student: Student): boolean {
   return payment.alumnoId === student.id;
+}
+
+function resolveStorageUrl(pathOrUrl?: string | null): string {
+  if (!pathOrUrl || typeof pathOrUrl !== 'string') return '';
+  const trimmed = pathOrUrl.trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  let cleanPath = trimmed;
+  if (cleanPath.startsWith(`${COMPROBANTES_BUCKET}/`)) {
+    cleanPath = cleanPath.replace(`${COMPROBANTES_BUCKET}/`, '');
+  } else if (cleanPath.startsWith('/')) {
+    cleanPath = cleanPath.substring(1);
+  }
+
+  const { data } = supabase.storage.from(COMPROBANTES_BUCKET).getPublicUrl(cleanPath);
+  return data?.publicUrl || '';
 }
 
 function getExportRows(students: Student[], transactions: Transaction[], gestion: string): ExportRow[] {
@@ -72,6 +94,11 @@ export default function StudentsView({ students, scholarships, transactions, pus
   const [gestion, setGestion] = useState('all');
   const [page, setPage] = useState(0);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  
+  // Mapa para almacenar los recibos usando pago_id como clave y recibo_url como valor
+  const [cajasRecibosMap, setCajasRecibosMap] = useState<Record<string, string>>({});
+  const [loadingRecibos, setLoadingRecibos] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
   const filtered = useMemo(() => students.filter((student) => {
     const q = search.toLowerCase();
@@ -82,7 +109,52 @@ export default function StudentsView({ students, scholarships, transactions, pus
   const years = useMemo(() => Array.from(new Set(transactions.map(getPaymentYear))).sort((a, b) => Number(b) - Number(a)), [transactions]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const rows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const selectedPayments = selectedStudent ? transactions.filter((payment) => paymentMatchesStudent(payment, selectedStudent) && (gestion === 'all' || getPaymentYear(payment) === gestion)) : [];
+  
+  const selectedPayments = useMemo(() => {
+    if (!selectedStudent) return [];
+    return transactions.filter((payment) => paymentMatchesStudent(payment, selectedStudent) && (gestion === 'all' || getPaymentYear(payment) === gestion));
+  }, [selectedStudent, transactions, gestion]);
+
+  // Consulta limpia utilizando exclusivamente `pago_id` y `recibo_url` según tu esquema
+  useEffect(() => {
+    async function fetchCajasRecibos() {
+      if (!selectedStudent || selectedPayments.length === 0) {
+        setCajasRecibosMap({});
+        return;
+      }
+
+      setLoadingRecibos(true);
+      try {
+        const pagoIds = selectedPayments.map((p) => p.id);
+        
+        const { data, error } = await supabase
+          .from('cajas_recibos')
+          .select('pago_id, recibo_url')
+          .in('pago_id', pagoIds);
+
+        if (error) {
+          console.error('Error al consultar cajas_recibos:', error);
+          return;
+        }
+
+        if (data) {
+          const map: Record<string, string> = {};
+          data.forEach((row: any) => {
+            if (row.pago_id && row.recibo_url) {
+              map[row.pago_id] = row.recibo_url;
+            }
+          });
+          setCajasRecibosMap(map);
+        }
+      } catch (err) {
+        console.error('Excepción al obtener recibos de caja:', err);
+      } finally {
+        setLoadingRecibos(false);
+      }
+    }
+
+    fetchCajasRecibos();
+  }, [selectedStudent, selectedPayments]);
 
   const handleExport = (exportRows: ExportRow[], fileName: string) => {
     if (!exportRows.length) {
@@ -237,26 +309,75 @@ export default function StudentsView({ students, scholarships, transactions, pus
                       <th className="table-head">Mensualidad / concepto</th>
                       <th className="table-head">Forma de pago</th>
                       <th className="table-head">N° Transacción</th>
+                      <th className="table-head">Comprobante (Alumno)</th>
+                      <th className="table-head">Recibo (Caja)</th>
                       <th className="table-head text-right">Monto</th>
                       <th className="table-head">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
-                    {selectedPayments.map((payment) => (
-                      <tr key={payment.id}>
-                        <td className="table-cell">{getPaymentYear(payment)}</td>
-                        <td className="table-cell">{formatDate(payment.fecha)}</td>
-                        <td className="table-cell font-medium">{payment.concepto}</td>
-                        <td className="table-cell">{payment.canal}</td>
-                        <td className="table-cell">{payment.numeroTransaccion}</td>
-                        <td className="table-cell text-right font-semibold">Bs {formatBs(payment.monto)}</td>
-                        <td className="table-cell">
-                          {payment.estado === 'CONCILIADO' ? <span className="badge-green">Conciliado</span> :
-                           payment.estado === 'RECHAZADO' ? <span className="badge-red">Rechazado</span> :
-                           <span className="badge-yellow">{payment.estado}</span>}
-                        </td>
-                      </tr>
-                    ))}
+                    {selectedPayments.map((payment) => {
+                      const comprobanteUrlResolved = resolveStorageUrl(payment.comprobanteUrl);
+                      
+                      // Buscamos el recibo usando payment.id contra el campo `pago_id` mapeado
+                      const reciboRawPath = cajasRecibosMap[payment.id] || (payment as any).recibos_url;
+                      const reciboUrlResolved = resolveStorageUrl(reciboRawPath);
+
+                      return (
+                        <tr key={payment.id}>
+                          <td className="table-cell">{getPaymentYear(payment)}</td>
+                          <td className="table-cell">{formatDate(payment.fecha)}</td>
+                          <td className="table-cell font-medium">{payment.concepto}</td>
+                          <td className="table-cell">{payment.canal}</td>
+                          <td className="table-cell">{payment.numeroTransaccion ?? '—'}</td>
+                          
+                          {/* Comprobante Alumno */}
+                          <td className="table-cell">
+                            {comprobanteUrlResolved ? (
+                              <div 
+                                onClick={() => setPreviewImage({ url: comprobanteUrlResolved, title: `Comprobante de Alumno - ${payment.concepto}` })}
+                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-ink-200 cursor-pointer bg-ink-50 hover:border-navy-500 transition"
+                                title="Ampliar comprobante"
+                              >
+                                <img src={comprobanteUrlResolved} alt="Comprobante" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                                  <Eye className="h-4 w-4" />
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-ink-400">—</span>
+                            )}
+                          </td>
+
+                          {/* Recibo Caja */}
+                          <td className="table-cell">
+                            {loadingRecibos ? (
+                              <span className="text-xs text-ink-400 animate-pulse">Cargando...</span>
+                            ) : reciboUrlResolved ? (
+                              <div 
+                                onClick={() => setPreviewImage({ url: reciboUrlResolved, title: `Recibo de Caja - ${payment.concepto}` })}
+                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-ink-200 cursor-pointer bg-ink-50 hover:border-emerald-500 transition"
+                                title="Ampliar recibo"
+                              >
+                                <img src={reciboUrlResolved} alt="Recibo" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                                  <Eye className="h-4 w-4" />
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-ink-400">—</span>
+                            )}
+                          </td>
+
+                          <td className="table-cell text-right font-semibold">Bs {formatBs(payment.monto)}</td>
+                          <td className="table-cell">
+                            {payment.estado === 'CONCILIADO' ? <span className="badge-green">Conciliado</span> :
+                             payment.estado === 'RECHAZADO' ? <span className="badge-red">Rechazado</span> :
+                             <span className="badge-yellow">{payment.estado}</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -270,6 +391,32 @@ export default function StudentsView({ students, scholarships, transactions, pus
           </div>
         )}
       </Modal>
+
+      {/* Lightbox / Modal de vista previa */}
+      {previewImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/70 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
+          <div className="relative max-w-3xl w-full bg-white rounded-2xl p-4 shadow-2xl space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-ink-100 pb-2">
+              <h4 className="font-bold text-ink-900 text-sm">{previewImage.title}</h4>
+              <button onClick={() => setPreviewImage(null)} className="btn-ghost p-1 rounded-lg"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="flex justify-center bg-ink-900/5 rounded-xl p-2 max-h-[75vh] overflow-auto">
+              <img src={previewImage.url} alt="Vista ampliada" className="max-h-[70vh] object-contain rounded-lg shadow" />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <a 
+                href={previewImage.url} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="btn-secondary text-xs"
+              >
+                Abrir en pestaña nueva
+              </a>
+              <button onClick={() => setPreviewImage(null)} className="btn-primary text-xs">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

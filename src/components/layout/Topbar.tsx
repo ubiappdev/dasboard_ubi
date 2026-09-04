@@ -5,15 +5,37 @@ interface TopbarProps {
   subtitle: string;
   searchPlaceholder?: string;
   onSearch?: (q: string) => void;
+  userProfile?: {
+    nombres: string;
+    apellidos: string;
+    tipo_usuario: string;
+    rol?: string | null;
+  };
 }
 
-export default function Topbar({ title, subtitle, searchPlaceholder = 'Buscar estudiantes, pagos, comprobantes…', onSearch }: TopbarProps) {
+export default function Topbar({ 
+  title, 
+  subtitle, 
+  searchPlaceholder = 'Buscar estudiantes, pagos, comprobantes…', 
+  onSearch,
+  userProfile 
+}: TopbarProps) {
   const today = new Date().toLocaleDateString('es-BO', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   });
+
+  // Extraer iniciales para el avatar de forma segura
+  const nombres = userProfile?.nombres || 'Usuario';
+  const apellidos = userProfile?.apellidos || '';
+  const iniciales = `${nombres.charAt(0)}${apellidos.charAt(0)}`.toUpperCase();
+
+  // Formatear el rol o tipo de usuario para mostrarlo ordenado
+  const rolTexto = userProfile?.rol 
+    ? `${userProfile.rol.charAt(0) + userProfile.rol.slice(1).toLowerCase()}` 
+    : (userProfile?.tipo_usuario || 'Administrador');
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-ink-200">
@@ -45,12 +67,16 @@ export default function Topbar({ title, subtitle, searchPlaceholder = 'Buscar es
           </button>
 
           <div className="flex items-center gap-2.5 rounded-lg border border-ink-200 px-2.5 py-1.5 hover:bg-ink-50 transition cursor-pointer">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy-800 text-white text-sm font-bold">
-              MR
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0A2463] text-white text-sm font-bold">
+              {iniciales}
             </div>
-            <div className="hidden md:block">
-              <p className="text-sm font-semibold text-ink-800 leading-tight">Marcela Ríos</p>
-              <p className="text-xs text-ink-500 leading-tight">Administradora</p>
+            <div className="hidden md:block text-left">
+              <p className="text-sm font-semibold text-ink-800 leading-tight">
+                {nombres} {apellidos}
+              </p>
+              <p className="text-xs text-ink-500 leading-tight capitalize">
+                {rolTexto} {userProfile?.tipo_usuario ? `(${userProfile.tipo_usuario.toLowerCase()})` : ''}
+              </p>
             </div>
             <ChevronDown className="h-4 w-4 text-ink-400" />
           </div>

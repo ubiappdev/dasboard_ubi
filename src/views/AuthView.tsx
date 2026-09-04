@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GraduationCap, ShieldCheck, LogIn, Loader2, Mail, Lock } from 'lucide-react';
+import { ShieldCheck, LogIn, Loader2, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { ToastPush } from '@/types';
 
@@ -11,6 +11,7 @@ export default function AuthView({ pushToast }: AuthViewProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -32,7 +33,7 @@ export default function AuthView({ pushToast }: AuthViewProps) {
       }
     } catch (error) {
       console.error('auth failed', error);
-      pushToast('error', mode === 'signin' ? 'Credenciales incorrectas o la cuenta no existe.' : 'No se pudo crear la cuenta.');
+      pushToast('error', mode === 'signin' ? 'Credenciales incorrectas o la cuenta não existe.' : 'No se pudo crear la cuenta.');
     } finally {
       setLoading(false);
     }
@@ -42,8 +43,12 @@ export default function AuthView({ pushToast }: AuthViewProps) {
     <main className="min-h-screen bg-navy-950 flex items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-pop p-8">
         <div className="flex items-center gap-3 mb-8">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy-800 text-white">
-            <GraduationCap className="h-7 w-7" />
+          <div className="flex h-18 w-12 items-center justify-center rounded-xl bg-navy-800 text-white overflow-hidden">
+            <img 
+              src="https://ahjgfwpqugokzksfoufu.supabase.co/storage/v1/object/public/configuracion-pagos/logo.png" 
+              alt="Logo UniControl" 
+              className="h-full w-full object-cover"
+            />
           </div>
           <div>
             <h1 className="text-xl font-bold text-ink-900">UniControl</h1>
@@ -72,7 +77,21 @@ export default function AuthView({ pushToast }: AuthViewProps) {
             <label className="label">Contraseña</label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-              <input type="password" className="input pl-9" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} />
+              <input 
+                type={showPassword ? 'text' : 'password'} 
+                className="input pl-9 pr-10" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="••••••••" 
+                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} 
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600 focus:outline-none"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
           </div>
           <button type="submit" disabled={loading} className="btn-primary w-full py-3">

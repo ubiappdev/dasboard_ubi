@@ -4,7 +4,6 @@ import {
   Store,
   Users,
   DollarSign,
-  GraduationCap,
   ShieldCheck,
   LogOut,
 } from 'lucide-react';
@@ -18,10 +17,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', label: 'Vista General', icon: LayoutDashboard, description: 'KPIs y resumen' },
-  { id: 'reconciliation', label: 'Conciliación Bancaria', icon: Landmark, description: 'Cruce de extractos' },
-  { id: 'window', label: 'Ventanilla / Caja', icon: Store, description: 'Pagos en efectivo' },
-  { id: 'students', label: 'Estudiantes', icon: Users, description: 'Alumnos' },
+  { id: 'dashboard', label: 'Dasboard', icon: LayoutDashboard, description: 'KPIs y resumen' },
+  { id: 'reconciliation', label: 'Conciliación Bancaria', icon: Landmark, description: 'Extractos/Conciliación' },
+  { id: 'window', label: 'Ventanilla / Caja', icon: Store, description: 'Emision de Recibos' },
+  { id: 'students', label: 'Estudiantes', icon: Users, description: 'Historial de Pagos' },
   { id: 'fees', label: 'Aranceles y Becas', icon: DollarSign, description: 'Precios y becas' },
 ];
 
@@ -38,8 +37,12 @@ export default function Sidebar({ active, onNavigate, userEmail, onSignOut }: Si
     <aside className="w-64 flex-shrink-0 bg-navy-900 text-white flex flex-col h-screen sticky top-0">
       <div className="px-5 py-5 border-b border-navy-800">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-navy-700 ring-1 ring-navy-600">
-            <GraduationCap className="h-6 w-6 text-white" />
+          <div className="flex h-12 w-8 items-center justify-center rounded-xl bg-navy-700 ring-1 ring-navy-600 overflow-hidden">
+            <img 
+              src="https://ahjgfwpqugokzksfoufu.supabase.co/storage/v1/object/public/configuracion-pagos/logo.png" 
+              alt="Logo UniControl" 
+              className="h-full w-full object-cover"
+            />
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight">UniControl</h1>

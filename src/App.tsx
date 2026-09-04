@@ -24,6 +24,13 @@ const MODULE_META: Record<ModuleId, { title: string; subtitle: string }> = {
 export default function App() {
   const [session, setSession] = useState<boolean | null>(null);
   const [userEmail, setUserEmail] = useState<string | undefined>();
+  const [userProfile, setUserProfile] = useState<{
+    nombres: string;
+    apellidos: string;
+    tipo_usuario: string;
+    rol: string | null;
+  } | undefined>(undefined);
+
   const [activeModule, setActiveModule] = useState<ModuleId>('dashboard');
   const { toasts, push, dismiss } = useToasts();
 
@@ -32,6 +39,25 @@ export default function App() {
   const [scholarships, setScholarships] = useState<ScholarshipType[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Función para cargar los datos del perfil desde Supabase
+  const loadUserProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('perfiles')
+        .select('nombres, apellidos, tipo_usuario, rol')
+        .eq('auth_id', userId)
+        .single();
+
+      if (error) {
+        console.error('Error al cargar perfil:', error.message);
+      } else if (data) {
+        setUserProfile(data);
+      }
+    } catch (err) {
+      console.error('Error inesperado al cargar perfil:', err);
+    }
+  };
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
@@ -51,15 +77,26 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setSession(!!data.session);
-      setUserEmail(data.session?.user?.email ?? undefined);
-      if (data.session) void refreshAll();
+      const currentSession = data.session;
+      setSession(!!currentSession);
+      setUserEmail(currentSession?.user?.email ?? undefined);
+      if (currentSession?.user) {
+        void loadUserProfile(currentSession.user.id);
+        void refreshAll();
+      }
     });
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(!!sess);
       setUserEmail(sess?.user?.email ?? undefined);
-      if (sess) void refreshAll();
+      if (sess?.user) {
+        void loadUserProfile(sess.user.id);
+        void refreshAll();
+      } else {
+        setUserProfile(undefined);
+      }
     });
+
     return () => sub.subscription.unsubscribe();
   }, [refreshAll]);
 
@@ -67,6 +104,7 @@ export default function App() {
     await supabase.auth.signOut();
     setSession(false);
     setUserEmail(undefined);
+    setUserProfile(undefined);
   };
 
   if (session === null) {
@@ -92,7 +130,12 @@ export default function App() {
     <div className="flex min-h-screen bg-ink-100">
       <Sidebar active={activeModule} onNavigate={setActiveModule} userEmail={userEmail} onSignOut={handleSignOut} />
       <main className="flex-1 min-w-0 flex flex-col">
-        <Topbar title={meta.title} subtitle={meta.subtitle} />
+        {/* Pasamos el perfil del usuario dinámicamente al Topbar */}
+        <Topbar 
+          title={meta.title} 
+          subtitle={meta.subtitle} 
+          userProfile={userProfile}
+        />
         <div className="flex-1 p-8 overflow-x-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-20">
