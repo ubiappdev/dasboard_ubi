@@ -19,8 +19,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Dasboard', icon: LayoutDashboard, description: 'KPIs y resumen' },
   { id: 'reconciliation', label: 'Conciliación Bancaria', icon: Landmark, description: 'Extractos/Conciliación' },
-  { id: 'window', label: 'Ventanilla / Caja', icon: Store, description: 'Emision de Recibos' },
-  { id: 'students', label: 'Estudiantes', icon: Users, description: 'Historial de Pagos' },
+  { id: 'window', label: 'Conciliacion de Caja', icon: Store, description: 'Validación de pagos' },
+  { id: 'students', label: 'Consulta de Pagos', icon: Users, description: 'Historial de Pagos' },
   { id: 'fees', label: 'Aranceles y Becas', icon: DollarSign, description: 'Precios y becas' },
 ];
 
