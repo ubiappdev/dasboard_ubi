@@ -148,15 +148,8 @@ export default function StudentsView({ students, scholarships, transactions, pus
     const matchesSearch = !q || `${student.nombres} ${student.apellidos} ${student.ci}`.toLowerCase().includes(q);
     const matchesCareer = career === 'all' || student.carrera === career;
     const matchesStatus = status === 'all' || student.estadoFinanciero === status;
-
-    // Si hay filtros de pago o fecha activos, opcionalmente podemos filtrar estudiantes que tengan al menos una transacción que cumpla
-    const hasMatchingPayments = transactions.some((payment) => 
-      paymentMatchesStudent(payment, student) && 
-      paymentMatchesFilters(payment, gestion, fechaInicio, fechaFin, tipoPago)
-    );
-
-    return matchesSearch && matchesCareer && matchesStatus && hasMatchingPayments;
-  }), [students, transactions, search, career, status, gestion, fechaInicio, fechaFin, tipoPago]);
+    return matchesSearch && matchesCareer && matchesStatus;
+  }), [students, search, career, status]);
 
   const years = useMemo(() => Array.from(new Set(transactions.map(getPaymentYear))).sort((a, b) => Number(b) - Number(a)), [transactions]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -230,7 +223,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
 
       <div className="card">
         <div className="flex flex-col gap-4 px-6 py-4 border-b border-ink-200">
-          {/* Primera línea de filtros */}
+          {/* Primera línea de filtros principales */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-3 flex-1">
               <div className="relative w-64">
@@ -257,7 +250,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
             </div>
           </div>
 
-          {/* Segunda línea de filtros avanzados (Gestión, Fechas y Tipo de Pago) */}
+          {/* Segunda línea de filtros avanzados en la cabecera (Gestión, Tipo de pago, Fechas) */}
           <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-ink-100 text-sm">
             <span className="flex items-center gap-1 font-medium text-ink-600"><Filter className="h-4 w-4" /> Filtros de pagos:</span>
             
@@ -273,6 +266,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
               <span className="text-ink-500 text-xs">Tipo de pago:</span>
               <select className="input py-1 text-xs w-auto" value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}>
                 <option value="all">Todos los tipos</option>
+                <option value="Transferencia">Transferencia</option>
                 {paymentChannels.filter(channel => channel !== 'Transferencia').map((channel) => <option key={channel} value={channel}>{channel}</option>)}
               </select>
             </div>
@@ -299,7 +293,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
         </div>
 
         <div className="px-6 py-3 bg-navy-50 border-b border-navy-100 text-sm text-navy-800 flex items-center gap-2">
-          <History className="h-4 w-4" /> Selecciona un estudiante para ver sus pagos filtrados.
+          <History className="h-4 w-4" /> Selecciona un estudiante para ver su historial de pagos filtrado.
         </div>
 
         <div className="overflow-x-auto">
@@ -380,7 +374,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-ink-500">Filtrado aplicado</p>
+                <p className="text-sm text-ink-500">Filtro aplicado para la vista</p>
                 <p className="text-sm font-semibold text-ink-900">
                   {gestion !== 'all' ? `Gestión: ${gestion} ` : ''} 
                   {tipoPago !== 'all' ? `· Tipo: ${tipoPago} ` : ''} 
