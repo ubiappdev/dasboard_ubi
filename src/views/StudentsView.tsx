@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye } from 'lucide-react';
+import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye, Filter } from 'lucide-react';
 import type { Student, ScholarshipType, ToastPush, Transaction } from '@/types';
 import { formatBs, formatDate } from '@/lib/format';
 import Modal from '@/components/ui/Modal';
@@ -49,36 +49,71 @@ function resolveStorageUrl(pathOrUrl?: string | null): string {
   return data?.publicUrl || '';
 }
 
-function getExportRows(students: Student[], transactions: Transaction[], gestion: string): ExportRow[] {
-  return students.flatMap((student) => {
-    const payments = transactions.filter((payment) => paymentMatchesStudent(payment, student) && (gestion === 'all' || getPaymentYear(payment) === gestion));
-    return payments.length > 0 ? payments.map((payment) => ({ gestion: getPaymentYear(payment), student, payment })) : [{ gestion: gestion === 'all' ? '—' : gestion, student }];
-  });
+// Verifica si un pago cumple con los filtros de año, fechas y canal/tipo de pago
+function paymentMatchesFilters(payment: Transaction, gestion: string, fechaInicio: string, fechaFin: string, tipoPago: string): boolean {
+  const paymentYear = getPaymentYear(payment);
+  if (gestion !== 'all' && paymentYear !== gestion) return false;
+
+  if (tipoPago !== 'all' && payment.canal !== tipoPago) return false;
+
+  if (fechaInicio || fechaFin) {
+    const paymentDateStr = payment.fecha.split('T')[0]; // Formato YYYY-MM-DD
+    if (fechaInicio && paymentDateStr < fechaInicio) return false;
+    if (fechaFin && paymentDateStr > fechaFin) return false;
+  }
+
+  return true;
 }
 
-function escapeCell(value: string | number): string {
-  return `"${String(value).replace(/"/g, '""')}"`;
+function getExportRows(students: Student[], transactions: Transaction[], gestion: string, fechaInicio: string, fechaFin: string, tipoPago: string): ExportRow[] {
+  return students.flatMap((student) => {
+    const payments = transactions.filter((payment) => 
+      paymentMatchesStudent(payment, student) && 
+      paymentMatchesFilters(payment, gestion, fechaInicio, fechaFin, tipoPago)
+    );
+    return payments.length > 0 
+      ? payments.map((payment) => ({ gestion: getPaymentYear(payment), student, payment })) 
+      : [{ gestion: gestion === 'all' ? '—' : gestion, student }];
+  });
 }
 
 function exportToExcel(rows: ExportRow[], fileName: string): void {
   const headers = ['Gestión', 'CI', 'Nombres', 'Apellidos', 'Carrera', 'Curso', 'Turno', 'Mensualidad / concepto', 'Monto (Bs)', 'Fecha de pago', 'Forma de pago', 'N° Transacción / Recibo', 'Estado del pago'];
-  const body = rows.map(({ gestion, student, payment }) => [
-    gestion,
-    student.ci,
-    student.nombres,
-    student.apellidos,
-    student.carrera,
-    student.curso,
-    student.turno,
-    payment?.concepto ?? 'Sin pagos registrados',
-    payment?.monto ?? 0,
-    payment ? formatDate(payment.fecha) : '—',
-    payment?.canal ?? '—',
-    payment?.numeroTransaccion ?? '—',
-    payment?.estado ?? '—',
-  ].map(escapeCell).join('\t'));
-  const content = `\ufeff${headers.map(escapeCell).join('\t')}\n${body.join('\n')}`;
-  const blob = new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  
+  const headerHtml = `<tr>${headers.map(h => `<th style="background-color: #f2f2f2; font-weight: bold; border: 1px solid #d9d9d9; text-align: center;">${h}</th>`).join('')}</tr>`;
+  
+  const bodyHtml = rows.map(({ gestion, student, payment }) => {
+    const data = [
+      gestion,
+      student.ci,
+      student.nombres,
+      student.apellidos,
+      student.carrera,
+      student.curso,
+      student.turno,
+      payment?.concepto ?? 'Sin pagos registrados',
+      payment?.monto ?? 0,
+      payment ? formatDate(payment.fecha) : '—',
+      payment?.canal ?? '—',
+      payment?.numeroTransaccion ?? '—',
+      payment?.estado ?? '—',
+    ];
+    return `<tr>${data.map(d => `<td style="border: 1px solid #d9d9d9;">${d}</td>`).join('')}</tr>`;
+  }).join('');
+
+  const tableHtml = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/1999/xhtml">
+      <head><meta charset="utf-8"></head>
+      <body>
+        <table>
+          <thead>${headerHtml}</thead>
+          <tbody>${bodyHtml}</tbody>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -92,19 +127,36 @@ export default function StudentsView({ students, scholarships, transactions, pus
   const [career, setCareer] = useState('all');
   const [status, setStatus] = useState('all');
   const [gestion, setGestion] = useState('all');
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [tipoPago, setTipoPago] = useState('all');
+  
   const [page, setPage] = useState(0);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   
-  // Mapa para almacenar los recibos usando pago_id como clave y recibo_url como valor
   const [cajasRecibosMap, setCajasRecibosMap] = useState<Record<string, string>>({});
   const [loadingRecibos, setLoadingRecibos] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
+  // Canales / tipos de pago únicos disponibles en las transacciones
+  const paymentChannels = useMemo(() => {
+    return Array.from(new Set(transactions.map((t) => t.canal))).filter(Boolean).sort();
+  }, [transactions]);
+
   const filtered = useMemo(() => students.filter((student) => {
     const q = search.toLowerCase();
     const matchesSearch = !q || `${student.nombres} ${student.apellidos} ${student.ci}`.toLowerCase().includes(q);
-    return matchesSearch && (career === 'all' || student.carrera === career) && (status === 'all' || student.estadoFinanciero === status);
-  }), [students, search, career, status]);
+    const matchesCareer = career === 'all' || student.carrera === career;
+    const matchesStatus = status === 'all' || student.estadoFinanciero === status;
+
+    // Si hay filtros de pago o fecha activos, opcionalmente podemos filtrar estudiantes que tengan al menos una transacción que cumpla
+    const hasMatchingPayments = transactions.some((payment) => 
+      paymentMatchesStudent(payment, student) && 
+      paymentMatchesFilters(payment, gestion, fechaInicio, fechaFin, tipoPago)
+    );
+
+    return matchesSearch && matchesCareer && matchesStatus && hasMatchingPayments;
+  }), [students, transactions, search, career, status, gestion, fechaInicio, fechaFin, tipoPago]);
 
   const years = useMemo(() => Array.from(new Set(transactions.map(getPaymentYear))).sort((a, b) => Number(b) - Number(a)), [transactions]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -112,10 +164,12 @@ export default function StudentsView({ students, scholarships, transactions, pus
   
   const selectedPayments = useMemo(() => {
     if (!selectedStudent) return [];
-    return transactions.filter((payment) => paymentMatchesStudent(payment, selectedStudent) && (gestion === 'all' || getPaymentYear(payment) === gestion));
-  }, [selectedStudent, transactions, gestion]);
+    return transactions.filter((payment) => 
+      paymentMatchesStudent(payment, selectedStudent) && 
+      paymentMatchesFilters(payment, gestion, fechaInicio, fechaFin, tipoPago)
+    );
+  }, [selectedStudent, transactions, gestion, fechaInicio, fechaFin, tipoPago]);
 
-  // Consulta limpia utilizando exclusivamente `pago_id` y `recibo_url` según tu esquema
   useEffect(() => {
     async function fetchCajasRecibos() {
       if (!selectedStudent || selectedPayments.length === 0) {
@@ -158,11 +212,11 @@ export default function StudentsView({ students, scholarships, transactions, pus
 
   const handleExport = (exportRows: ExportRow[], fileName: string) => {
     if (!exportRows.length) {
-      pushToast('warning', 'No hay estudiantes para exportar con los filtros seleccionados.');
+      pushToast('warning', 'No hay registros para exportar con los filtros seleccionados.');
       return;
     }
     exportToExcel(exportRows, fileName);
-    pushToast('success', 'El historial se exportó en un archivo compatible con Excel.');
+    pushToast('success', 'El reporte se exportó correctamente en formato Excel.');
   };
 
   return (
@@ -175,38 +229,77 @@ export default function StudentsView({ students, scholarships, transactions, pus
       </div>
 
       <div className="card">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-ink-200">
-          <div className="flex flex-wrap gap-3">
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-              <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="input pl-9" placeholder="Buscar por nombre o CI" />
+        <div className="flex flex-col gap-4 px-6 py-4 border-b border-ink-200">
+          {/* Primera línea de filtros */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-3 flex-1">
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
+                <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="input pl-9" placeholder="Buscar por nombre o CI" />
+              </div>
+              <select className="input w-auto" value={career} onChange={(e) => setCareer(e.target.value)}>
+                <option value="all">Todas las carreras</option>
+                {Array.from(new Set(students.map((s) => s.carrera))).sort().map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="all">Todos los estados</option>
+                <option value="AL DIA">Al día</option>
+                <option value="PENDIENTE">Pendiente</option>
+              </select>
             </div>
-            <select className="input w-auto" value={career} onChange={(e) => setCareer(e.target.value)}>
-              <option value="all">Todas las carreras</option>
-              {Array.from(new Set(students.map((s) => s.carrera))).sort().map((c) => <option key={c}>{c}</option>)}
-            </select>
-            <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="all">Todos los estados</option>
-              <option value="AL DIA">Al día</option>
-              <option value="PENDIENTE">Pendiente</option>
-            </select>
-            <select className="input w-auto" value={gestion} onChange={(e) => setGestion(e.target.value)}>
-              <option value="all">Todas las gestiones</option>
-              {years.map((year) => <option key={year}>{year}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <button className="btn-secondary" onClick={() => pushToast('info', 'La importación de estudiantes estará disponible en el siguiente paso.')}>
+                <Upload className="h-4 w-4" /> Importar
+              </button>
+              <button className="btn-primary" onClick={() => handleExport(getExportRows(filtered, transactions, gestion, fechaInicio, fechaFin, tipoPago), `reporte-estudiantes-${gestion}.xls`)}>
+                <Download className="h-4 w-4" /> Exportar Excel
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => pushToast('info', 'La importación de estudiantes estará disponible en el siguiente paso.')}>
-              <Upload className="h-4 w-4" /> Importar
-            </button>
-            <button className="btn-primary" onClick={() => handleExport(getExportRows(filtered, transactions, gestion), `historial-estudiantes-${gestion}.xls`)}>
-              <Download className="h-4 w-4" /> Exportar Excel
-            </button>
+
+          {/* Segunda línea de filtros avanzados (Gestión, Fechas y Tipo de Pago) */}
+          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-ink-100 text-sm">
+            <span className="flex items-center gap-1 font-medium text-ink-600"><Filter className="h-4 w-4" /> Filtros de pagos:</span>
+            
+            <div className="flex items-center gap-1.5">
+              <span className="text-ink-500 text-xs">Gestión:</span>
+              <select className="input py-1 text-xs w-auto" value={gestion} onChange={(e) => setGestion(e.target.value)}>
+                <option value="all">Todas</option>
+                {years.map((year) => <option key={year}>{year}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-ink-500 text-xs">Tipo de pago:</span>
+              <select className="input py-1 text-xs w-auto" value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}>
+                <option value="all">Todos los tipos</option>
+                {paymentChannels.filter(channel => channel !== 'Transferencia').map((channel) => <option key={channel} value={channel}>{channel}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-ink-500 text-xs">Desde:</span>
+              <input type="date" className="input py-1 text-xs w-auto" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-ink-500 text-xs">Hasta:</span>
+              <input type="date" className="input py-1 text-xs w-auto" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} />
+            </div>
+
+            {(gestion !== 'all' || tipoPago !== 'all' || fechaInicio || fechaFin) && (
+              <button 
+                onClick={() => { setGestion('all'); setTipoPago('all'); setFechaInicio(''); setFechaFin(''); }} 
+                className="text-xs text-navy-600 hover:underline font-medium ml-auto"
+              >
+                Limpiar filtros de pago
+              </button>
+            )}
           </div>
         </div>
 
         <div className="px-6 py-3 bg-navy-50 border-b border-navy-100 text-sm text-navy-800 flex items-center gap-2">
-          <History className="h-4 w-4" /> Selecciona un estudiante para ver sus pagos de la gestión elegida.
+          <History className="h-4 w-4" /> Selecciona un estudiante para ver sus pagos filtrados.
         </div>
 
         <div className="overflow-x-auto">
@@ -287,17 +380,22 @@ export default function StudentsView({ students, scholarships, transactions, pus
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-ink-500">Historial de la gestión</p>
-                <p className="text-xl font-bold text-ink-900">{gestion === 'all' ? 'Todas' : gestion}</p>
+                <p className="text-sm text-ink-500">Filtrado aplicado</p>
+                <p className="text-sm font-semibold text-ink-900">
+                  {gestion !== 'all' ? `Gestión: ${gestion} ` : ''} 
+                  {tipoPago !== 'all' ? `· Tipo: ${tipoPago} ` : ''} 
+                  {fechaInicio || fechaFin ? `· Rango: ${fechaInicio || 'Inicio'} al ${fechaFin || 'Hoy'}` : ''}
+                  {gestion === 'all' && tipoPago === 'all' && !fechaInicio && !fechaFin ? 'Todos los registros' : ''}
+                </p>
               </div>
-              <button className="btn-primary" onClick={() => handleExport(getExportRows([selectedStudent], transactions, gestion), `historial-${selectedStudent.ci}-${gestion}.xls`)}>
+              <button className="btn-primary" onClick={() => handleExport(getExportRows([selectedStudent], transactions, gestion, fechaInicio, fechaFin, tipoPago), `historial-${selectedStudent.ci}.xls`)}>
                 <Download className="h-4 w-4" /> Exportar Excel
               </button>
             </div>
 
             {selectedPayments.length === 0 ? (
               <div className="rounded-xl border border-dashed border-ink-300 p-8 text-center text-ink-500">
-                No hay pagos registrados para esta gestión.
+                No hay pagos registrados que coincidan con los filtros seleccionados.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -318,8 +416,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
                   <tbody className="divide-y divide-ink-100">
                     {selectedPayments.map((payment) => {
                       const comprobanteUrlResolved = resolveStorageUrl(payment.comprobanteUrl);
-                      
-                      // Buscamos el recibo usando payment.id contra el campo `pago_id` mapeado
                       const reciboRawPath = cajasRecibosMap[payment.id] || (payment as any).recibos_url;
                       const reciboUrlResolved = resolveStorageUrl(reciboRawPath);
 
@@ -331,7 +427,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
                           <td className="table-cell">{payment.canal}</td>
                           <td className="table-cell">{payment.numeroTransaccion ?? '—'}</td>
                           
-                          {/* Comprobante Alumno */}
                           <td className="table-cell">
                             {comprobanteUrlResolved ? (
                               <div 
@@ -349,7 +444,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
                             )}
                           </td>
 
-                          {/* Recibo Caja */}
                           <td className="table-cell">
                             {loadingRecibos ? (
                               <span className="text-xs text-ink-400 animate-pulse">Cargando...</span>
@@ -392,7 +486,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
         )}
       </Modal>
 
-      {/* Lightbox / Modal de vista previa */}
       {previewImage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/70 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
           <div className="relative max-w-3xl w-full bg-white rounded-2xl p-4 shadow-2xl space-y-3" onClick={(e) => e.stopPropagation()}>
