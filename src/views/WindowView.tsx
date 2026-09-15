@@ -438,20 +438,20 @@ export default function WindowView({ pushToast }: WindowViewProps) {
           <Receipt className="h-4 w-4" /> Gestión de Recibos
         </button>
         <button
-          onClick={() => setMainTab('pagos_conciliados')}
-          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition ${
-            mainTab === 'pagos_conciliados' ? 'border-navy-800 text-navy-900' : 'border-transparent text-ink-500 hover:text-ink-800'
-          }`}
-        >
-          <Receipt className="h-4 w-4" /> Pagos Bancarios/Efectivo
-        </button>
-        <button
           onClick={() => setMainTab('pagos_efectivo_pendientes')}
           className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition ${
             mainTab === 'pagos_efectivo_pendientes' ? 'border-navy-800 text-navy-900' : 'border-transparent text-ink-500 hover:text-ink-800'
           }`}
         >
           <Banknote className="h-4 w-4" /> Pagos en efectivo
+        </button>
+        <button
+          onClick={() => setMainTab('pagos_conciliados')}
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition ${
+            mainTab === 'pagos_conciliados' ? 'border-navy-800 text-navy-900' : 'border-transparent text-ink-500 hover:text-ink-800'
+          }`}
+        >
+          <Receipt className="h-4 w-4" /> Pagos Bancarios/Efectivo
         </button>
       </div>
 
@@ -567,82 +567,7 @@ export default function WindowView({ pushToast }: WindowViewProps) {
       )}
 
 
-      {/* Pestaña 2: PAGOS BANCARIOS Y EN EFECTIVO CONCILIADOS */}
-      {mainTab === 'pagos_conciliados' && (
-        <div className="space-y-6">
-          <div>
-            <h3 className="text-lg font-bold text-ink-900">Pagos Bancarios/Efectivo : Conciliados</h3>
-            <p className="text-sm text-ink-500">
-              Pagos validados listos para emitir su recibo de caja de forma unitaria.
-            </p>
-          </div>
-          <div className="card p-4 bg-navy-50/50 border-navy-200">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-              <input
-                className="input pl-9 bg-white"
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Buscar por CI, nombre, concepto o transacción..."
-              />
-            </div>
-          </div>
-          <div className="card">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-head">Estado</th>
-                    <th className="table-head">N° Transacción</th>
-                    <th className="table-head">Estudiante</th>
-                    <th className="table-head">Canal</th>
-                    <th className="table-head">Concepto</th>
-                    <th className="table-head text-right">Monto</th>
-                    <th className="table-head">Fecha</th>
-                    <th className="table-head text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {loading ? (
-                    <tr><td colSpan={8} className="text-center py-8 text-ink-400 text-sm">Cargando...</td></tr>
-                  ) : filteredPayments.length === 0 ? (
-                    <tr><td colSpan={8} className="text-center py-8 text-ink-400 text-sm">No hay pagos coincidentes.</td></tr>
-                  ) : (
-                    filteredPayments.map((p) => {
-                      const Icon = channelIcon(p.canal_pago || 'QR');
-                      const nombreEstudiante = [p.alumnos?.nombres, p.alumnos?.apellidos].filter(Boolean).join(' ') || 'Sin nombre';
-                      return (
-                        <tr key={p.id} className="hover:bg-ink-50">
-                          <td className="table-cell">{statusBadge(p.estado_conciliacion)}</td>
-                          <td className="table-cell font-mono text-xs font-semibold">{p.numero_transaccion || '—'}</td>
-                          <td className="table-cell">
-                            <b>{nombreEstudiante}</b>
-                            <div className="text-xs text-ink-400">CI: {p.alumnos?.ci || 'N/A'}</div>
-                          </td>
-                          <td className="table-cell">
-                            <span className="badge-navy"><Icon className="h-3 w-3" />{CHANNEL_LABELS[p.canal_pago as PaymentChannel] || p.canal_pago}</span>
-                          </td>
-                          <td className="table-cell">{p.concepto || '—'}</td>
-                          <td className="table-cell text-right font-semibold">Bs {formatBs(p.monto_pagado)}</td>
-                          <td className="table-cell text-xs text-ink-500">{formatDateTime(p.fecha_pago)}</td>
-                          <td className="table-cell text-right">
-                            <button onClick={() => openUploadModal(p)} className="btn-secondary text-xs">
-                              <Receipt className="h-4 w-4" /> Subir comprobante
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {/* Pestaña 3: PAGOS EN EFECTIVO (PENDIENTES) */}
+      {/* Pestaña 2: PAGOS EN EFECTIVO (PENDIENTES) */}
       {mainTab === 'pagos_efectivo_pendientes' && (
         <div className="space-y-6">
           <div>
@@ -685,6 +610,81 @@ export default function WindowView({ pushToast }: WindowViewProps) {
                   ) : (
                     filteredPendingCashPayments.map((p) => {
                       const Icon = channelIcon(p.canal_pago || 'EFECTIVO');
+                      const nombreEstudiante = [p.alumnos?.nombres, p.alumnos?.apellidos].filter(Boolean).join(' ') || 'Sin nombre';
+                      return (
+                        <tr key={p.id} className="hover:bg-ink-50">
+                          <td className="table-cell">{statusBadge(p.estado_conciliacion)}</td>
+                          <td className="table-cell font-mono text-xs font-semibold">{p.numero_transaccion || '—'}</td>
+                          <td className="table-cell">
+                            <b>{nombreEstudiante}</b>
+                            <div className="text-xs text-ink-400">CI: {p.alumnos?.ci || 'N/A'}</div>
+                          </td>
+                          <td className="table-cell">
+                            <span className="badge-navy"><Icon className="h-3 w-3" />{CHANNEL_LABELS[p.canal_pago as PaymentChannel] || p.canal_pago}</span>
+                          </td>
+                          <td className="table-cell">{p.concepto || '—'}</td>
+                          <td className="table-cell text-right font-semibold">Bs {formatBs(p.monto_pagado)}</td>
+                          <td className="table-cell text-xs text-ink-500">{formatDateTime(p.fecha_pago)}</td>
+                          <td className="table-cell text-right">
+                            <button onClick={() => openUploadModal(p)} className="btn-secondary text-xs">
+                              <Receipt className="h-4 w-4" /> Subir comprobante
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* Pestaña 3: PAGOS BANCARIOS Y EN EFECTIVO CONCILIADOS */}
+      {mainTab === 'pagos_conciliados' && (
+        <div className="space-y-6">
+          <div>
+            <h3 className="text-lg font-bold text-ink-900">Pagos Bancarios/Efectivo : Conciliados</h3>
+            <p className="text-sm text-ink-500">
+              Pagos validados listos para emitir su recibo de caja de forma unitaria.
+            </p>
+          </div>
+          <div className="card p-4 bg-navy-50/50 border-navy-200">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
+              <input
+                className="input pl-9 bg-white"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Buscar por CI, nombre, concepto o transacción..."
+              />
+            </div>
+          </div>
+          <div className="card">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-head">Estado</th>
+                    <th className="table-head">N° Transacción</th>
+                    <th className="table-head">Estudiante</th>
+                    <th className="table-head">Canal</th>
+                    <th className="table-head">Concepto</th>
+                    <th className="table-head text-right">Monto</th>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {loading ? (
+                    <tr><td colSpan={8} className="text-center py-8 text-ink-400 text-sm">Cargando...</td></tr>
+                  ) : filteredPayments.length === 0 ? (
+                    <tr><td colSpan={8} className="text-center py-8 text-ink-400 text-sm">No hay pagos coincidentes.</td></tr>
+                  ) : (
+                    filteredPayments.map((p) => {
+                      const Icon = channelIcon(p.canal_pago || 'QR');
                       const nombreEstudiante = [p.alumnos?.nombres, p.alumnos?.apellidos].filter(Boolean).join(' ') || 'Sin nombre';
                       return (
                         <tr key={p.id} className="hover:bg-ink-50">

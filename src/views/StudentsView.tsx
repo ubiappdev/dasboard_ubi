@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye, Filter } from 'lucide-react';
+import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye, Filter, FileText, Send } from 'lucide-react';
 import type { Student, ScholarshipType, ToastPush, Transaction } from '@/types';
 import { formatBs, formatDate } from '@/lib/format';
 import Modal from '@/components/ui/Modal';
@@ -49,7 +49,6 @@ function resolveStorageUrl(pathOrUrl?: string | null): string {
   return data?.publicUrl || '';
 }
 
-// Verifica si un pago cumple con los filtros de año, fechas y canal/tipo de pago
 function paymentMatchesFilters(payment: Transaction, gestion: string, fechaInicio: string, fechaFin: string, tipoPago: string): boolean {
   const paymentYear = getPaymentYear(payment);
   if (gestion !== 'all' && paymentYear !== gestion) return false;
@@ -57,7 +56,7 @@ function paymentMatchesFilters(payment: Transaction, gestion: string, fechaInici
   if (tipoPago !== 'all' && payment.canal !== tipoPago) return false;
 
   if (fechaInicio || fechaFin) {
-    const paymentDateStr = payment.fecha.split('T')[0]; // Formato YYYY-MM-DD
+    const paymentDateStr = payment.fecha.split('T')[0]; 
     if (fechaInicio && paymentDateStr < fechaInicio) return false;
     if (fechaFin && paymentDateStr > fechaFin) return false;
   }
@@ -122,6 +121,73 @@ function exportToExcel(rows: ExportRow[], fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
+function exportToPdf(rows: ExportRow[], title: string) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${title}</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 11px; color: #333; margin: 20px; }
+          h2 { text-align: center; color: #1e3a8a; margin-bottom: 5px; }
+          p.subtitle { text-align: center; color: #666; margin-top: 0; margin-bottom: 20px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+          th { background-color: #1e3a8a; color: white; font-weight: bold; }
+          tr:nth-child(even) { background-color: #f8fafc; }
+          .text-right { text-align: right; }
+        </style>
+      </head>
+      <body>
+        <h2>Reporte General de Estudiantes y Pagos</h2>
+        <p class="subtitle">Generado el ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString()}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Gestión</th>
+              <th>CI</th>
+              <th>Estudiante</th>
+              <th>Carrera</th>
+              <th>Curso</th>
+              <th>Concepto</th>
+              <th class="text-right">Monto (Bs)</th>
+              <th>Fecha</th>
+              <th>Canal</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(({ gestion, student, payment }) => `
+              <tr>
+                <td>${gestion}</td>
+                <td>${student.ci}</td>
+                <td><b>${student.apellidos} ${student.nombres}</b></td>
+                <td>${student.carrera}</td>
+                <td>${student.curso}</td>
+                <td>${payment?.concepto ?? 'Sin pagos'}</td>
+                <td class="text-right">${payment ? formatBs(payment.monto) : '—'}</td>
+                <td>${payment ? formatDate(payment.fecha) : '—'}</td>
+                <td>${payment?.canal ?? '—'}</td>
+                <td>${payment?.estado ?? '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <script>
+          window.onload = function() { window.print(); window.close(); }
+        </script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+
 export default function StudentsView({ students, scholarships, transactions, pushToast }: StudentsViewProps) {
   const [search, setSearch] = useState('');
   const [career, setCareer] = useState('all');
@@ -137,8 +203,12 @@ export default function StudentsView({ students, scholarships, transactions, pus
   const [cajasRecibosMap, setCajasRecibosMap] = useState<Record<string, string>>({});
   const [loadingRecibos, setLoadingRecibos] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [sendingReminder, setSendingReminder] = useState(false);
 
-  // Canales / tipos de pago únicos disponibles en las transacciones
+  // Estados locales para el mensaje individual dentro del modal
+  const [individualMessage, setIndividualMessage] = useState('');
+  const [sendingIndividual, setSendingIndividual] = useState(false);
+
   const paymentChannels = useMemo(() => {
     return Array.from(new Set(transactions.map((t) => t.canal))).filter(Boolean).sort();
   }, [transactions]);
@@ -212,6 +282,82 @@ export default function StudentsView({ students, scholarships, transactions, pus
     pushToast('success', 'El reporte se exportó correctamente en formato Excel.');
   };
 
+  const handleExportPdf = (exportRows: ExportRow[]) => {
+    if (!exportRows.length) {
+      pushToast('warning', 'No hay registros para exportar con los filtros seleccionados.');
+      return;
+    }
+    exportToPdf(exportRows, 'Reporte_Estudiantes_Pagos');
+    pushToast('success', 'Se abrió la vista previa del reporte en PDF.');
+  };
+
+  const handleSendReminder = async () => {
+    if (filtered.length === 0) {
+      pushToast('warning', 'No hay estudiantes en el listado actual para enviar mensajes.');
+      return;
+    }
+
+    if (!confirm(`¿Estás seguro de enviar el recordatorio de pago quincenal a los ${filtered.length} estudiantes filtrados?`)) {
+      return;
+    }
+
+    setSendingReminder(true);
+    try {
+      const mensajesData = filtered.map((student) => ({
+        alumno_id: student.id,
+        titulo: 'Recordatorio Quincenal de Pago',
+        cuerpo: `Estimado(a) ${student.nombres} ${student.apellidos}, le recordamos realizar su pago correspondiente para mantenerse al día con sus cuotas institucionales.`,
+        tipo: 'PAGO',
+        leido: false
+      }));
+
+      const { error } = await supabase
+        .from('buzon_mensajes')
+        .insert(mensajesData);
+
+      if (error) throw error;
+
+      pushToast('success', `Se enviaron exitosamente ${filtered.length} recordatorios al buzón de los estudiantes.`);
+    } catch (err: any) {
+      console.error('Error al enviar recordatorios:', err);
+      pushToast('error', 'Ocurrió un error al enviar los mensajes al buzón.');
+    } finally {
+      setSendingReminder(false);
+    }
+  };
+
+  // Función para enviar mensaje individual a un alumno específico desde el modal
+  const handleSendIndividualMessage = async () => {
+    if (!selectedStudent) return;
+    if (!individualMessage.trim()) {
+      pushToast('warning', 'Por favor escribe el contenido del mensaje antes de enviar.');
+      return;
+    }
+
+    setSendingIndividual(true);
+    try {
+      const { error } = await supabase
+        .from('buzon_mensajes')
+        .insert({
+          alumno_id: selectedStudent.id,
+          titulo: 'Notificación Administrativa',
+          cuerpo: individualMessage.trim(),
+          tipo: 'AVISO',
+          leido: false
+        });
+
+      if (error) throw error;
+
+      pushToast('success', `Mensaje enviado correctamente a ${selectedStudent.nombres}.`);
+      setIndividualMessage('');
+    } catch (err: any) {
+      console.error('Error al enviar mensaje individual:', err);
+      pushToast('error', 'Ocurrió un error al enviar el mensaje.');
+    } finally {
+      setSendingIndividual(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -223,7 +369,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
 
       <div className="card">
         <div className="flex flex-col gap-4 px-6 py-4 border-b border-ink-200">
-          {/* Primera línea de filtros principales */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-3 flex-1">
               <div className="relative w-64">
@@ -240,9 +385,16 @@ export default function StudentsView({ students, scholarships, transactions, pus
                 <option value="PENDIENTE">Pendiente</option>
               </select>
             </div>
-            <div className="flex gap-2">
+            
+            <div className="flex flex-wrap gap-2">
               <button className="btn-secondary" onClick={() => pushToast('info', 'La importación de estudiantes estará disponible en el siguiente paso.')}>
                 <Upload className="h-4 w-4" /> Importar
+              </button>
+              <button className="btn-secondary" onClick={() => handleExportPdf(getExportRows(filtered, transactions, gestion, fechaInicio, fechaFin, tipoPago))}>
+                <FileText className="h-4 w-4 text-red-600" /> Exportar PDF
+              </button>
+              <button className="btn-secondary" onClick={handleSendReminder} disabled={sendingReminder}>
+                <Send className="h-4 w-4 text-navy-600" /> {sendingReminder ? 'Enviando...' : 'Enviar mensaje'}
               </button>
               <button className="btn-primary" onClick={() => handleExport(getExportRows(filtered, transactions, gestion, fechaInicio, fechaFin, tipoPago), `reporte-estudiantes-${gestion}.xls`)}>
                 <Download className="h-4 w-4" /> Exportar Excel
@@ -250,7 +402,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
             </div>
           </div>
 
-          {/* Segunda línea de filtros avanzados en la cabecera (Gestión, Tipo de pago, Fechas) */}
           <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-ink-100 text-sm">
             <span className="flex items-center gap-1 font-medium text-ink-600"><Filter className="h-4 w-4" /> Filtros de pagos:</span>
             
@@ -364,7 +515,7 @@ export default function StudentsView({ students, scholarships, transactions, pus
 
       <Modal
         open={!!selectedStudent}
-        onClose={() => setSelectedStudent(null)}
+        onClose={() => { setSelectedStudent(null); setIndividualMessage(''); }}
         title={selectedStudent ? `${selectedStudent.nombres} ${selectedStudent.apellidos}` : 'Historial de pagos'}
         subtitle={selectedStudent ? `${selectedStudent.carrera} · Curso ${selectedStudent.curso} · CI ${selectedStudent.ci}` : undefined}
         size="xl"
@@ -372,9 +523,10 @@ export default function StudentsView({ students, scholarships, transactions, pus
       >
         {selectedStudent && (
           <div className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Cabecera de botones de exportación dentro del modal */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-ink-50 p-3 rounded-xl border border-ink-200">
               <div>
-                <p className="text-sm text-ink-500">Filtro aplicado para la vista</p>
+                <p className="text-xs text-ink-500 uppercase font-bold tracking-wider">Filtro aplicado</p>
                 <p className="text-sm font-semibold text-ink-900">
                   {gestion !== 'all' ? `Gestión: ${gestion} ` : ''} 
                   {tipoPago !== 'all' ? `· Tipo: ${tipoPago} ` : ''} 
@@ -382,9 +534,14 @@ export default function StudentsView({ students, scholarships, transactions, pus
                   {gestion === 'all' && tipoPago === 'all' && !fechaInicio && !fechaFin ? 'Todos los registros' : ''}
                 </p>
               </div>
-              <button className="btn-primary" onClick={() => handleExport(getExportRows([selectedStudent], transactions, gestion, fechaInicio, fechaFin, tipoPago), `historial-${selectedStudent.ci}.xls`)}>
-                <Download className="h-4 w-4" /> Exportar Excel
-              </button>
+              <div className="flex items-center gap-2">
+                <button className="btn-secondary text-xs" onClick={() => handleExportPdf(getExportRows([selectedStudent], transactions, gestion, fechaInicio, fechaFin, tipoPago))}>
+                  <FileText className="h-4 w-4 text-red-600" /> Descargar PDF
+                </button>
+                <button className="btn-primary text-xs" onClick={() => handleExport(getExportRows([selectedStudent], transactions, gestion, fechaInicio, fechaFin, tipoPago), `historial-${selectedStudent.ci}.xls`)}>
+                  <Download className="h-4 w-4" /> Exportar Excel
+                </button>
+              </div>
             </div>
 
             {selectedPayments.length === 0 ? (
@@ -471,8 +628,31 @@ export default function StudentsView({ students, scholarships, transactions, pus
               </div>
             )}
 
-            <div className="flex justify-end">
-              <button className="btn-secondary" onClick={() => setSelectedStudent(null)}>
+            {/* Sección añadida: Enviar mensaje individual al alumno dentro del modal */}
+            <div className="bg-navy-50/60 p-4 rounded-xl border border-navy-100 space-y-3">
+              <label className="block text-xs font-bold text-navy-900 uppercase tracking-wide flex items-center gap-1.5">
+                <Send className="h-3.5 w-3.5 text-navy-600" /> Enviar mensaje individual al buzón del estudiante
+              </label>
+              <div className="flex gap-2">
+                <textarea 
+                  className="input text-xs flex-1 bg-white" 
+                  rows={2} 
+                  placeholder={`Escribe un mensaje personalizado para ${selectedStudent.nombres}...`}
+                  value={individualMessage}
+                  onChange={(e) => setIndividualMessage(e.target.value)}
+                />
+                <button 
+                  className="btn-primary self-end text-xs h-10 px-4" 
+                  onClick={handleSendIndividualMessage}
+                  disabled={sendingIndividual}
+                >
+                  {sendingIndividual ? 'Enviando...' : 'Enviar'}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button className="btn-secondary" onClick={() => { setSelectedStudent(null); setIndividualMessage(''); }}>
                 <X className="h-4 w-4" /> Cerrar
               </button>
             </div>

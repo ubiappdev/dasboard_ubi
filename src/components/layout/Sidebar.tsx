@@ -6,6 +6,7 @@ import {
   DollarSign,
   ShieldCheck,
   LogOut,
+  BarChart3
 } from 'lucide-react';
 import type { ModuleId } from '@/types';
 
@@ -17,11 +18,12 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', label: 'Dasboard', icon: LayoutDashboard, description: 'KPIs y resumen' },
+  { id: 'dashboard', label: 'Transacciones Genearles', icon: LayoutDashboard, description: 'Pagos por banco y caja' },
   { id: 'reconciliation', label: 'Conciliación Bancaria', icon: Landmark, description: 'Extractos/Conciliación' },
   { id: 'window', label: 'Conciliacion de Caja', icon: Store, description: 'Validación de pagos' },
-  { id: 'students', label: 'Consulta de Pagos', icon: Users, description: 'Historial de Pagos' },
+  { id: 'students', label: 'Control/Consulta de Pagos', icon: Users, description: 'Historial de Pagos' },
   { id: 'fees', label: 'Aranceles y Becas', icon: DollarSign, description: 'Precios y becas' },
+  { id: 'rep', label: 'Reportes y Estadisticas', icon: BarChart3, description: 'Reportes' },
 ];
 
 interface SidebarProps {

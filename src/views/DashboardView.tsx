@@ -1,36 +1,42 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Wallet,
-  Users,
   Clock,
   AlertTriangle,
   TrendingUp,
   TrendingDown,
-  ArrowUpRight,
   QrCode,
   Banknote,
   ArrowRightLeft,
   Landmark,
+  Eye,
+  Filter,
+  X,
+  ExternalLink,
 } from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts';
 import type { Student, Transaction, ToastPush, PaymentChannel } from '@/types';
-import { WEEKLY_COLLECTION } from '@/lib/mockData';
-import { formatBs, formatBsShort, timeAgo } from '@/lib/format';
+import { formatBs, timeAgo } from '@/lib/format';
+import { supabase } from '@/lib/supabase';
 
 interface DashboardViewProps {
   students: Student[];
   transactions: Transaction[];
   pushToast: ToastPush;
 }
+
+const COMPROBANTES_BUCKET = 'comprobantes';
+
+// Función para resolver la URL pública usando el SDK de Supabase Storage
+const getPublicUrl = (url?: string | null): string => {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  const { data } = supabase.storage.from(COMPROBANTES_BUCKET).getPublicUrl(trimmed);
+  return data?.publicUrl || '';
+};
 
 const ACCENT_STYLES = {
   navy: { bg: 'bg-navy-50', text: 'text-navy-700', ring: 'ring-navy-200' },
@@ -89,52 +95,47 @@ function KpiCard({ label, value, subValue, icon: Icon, trend, accent, alert }: {
   );
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border border-ink-200 bg-white px-3 py-2 shadow-pop">
-      <p className="text-xs font-semibold text-ink-700 mb-1">{label}</p>
-      {payload.map((p: any) => (
-        <div key={p.dataKey} className="flex items-center gap-2 text-xs">
-          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
-          <span className="text-ink-600">{p.name}:</span>
-          <span className="font-semibold text-ink-800">Bs {formatBs(p.value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
 export default function DashboardView({ students, transactions, pushToast }: DashboardViewProps) {
+  // Estados para filtros
+  const [filtroEstado, setFiltroEstado] = useState<string>('TODOS');
+  const [filtroCanal, setFiltroCanal] = useState<string>('TODOS');
+  const [filtroFecha, setFiltroFecha] = useState<string>('TODOS');
+
+  // Estado para el modal de previsualización de comprobante (Lightbox)
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle: string } | null>(null);
+
   const stats = useMemo(() => {
-    const totalMes = transactions.reduce((sum, t) => sum + t.monto, 0);
-    const alDia = students.filter((s) => s.estadoFinanciero === 'AL DIA').length;
     const porValidar = transactions.filter((t) => t.estado === 'PENDIENTE').length;
     const alertas = transactions.filter((t) => t.estado === 'RECHAZADO').length;
-    return { totalMes, alDia, porValidar, alertas };
-  }, [students, transactions]);
+    return { porValidar, alertas };
+  }, [transactions]);
 
-  const recentTx = transactions.slice(0, 8);
+  // Lógica de filtrado para las transacciones
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      if (filtroEstado !== 'TODOS' && tx.estado !== filtroEstado) return false;
+      if (filtroCanal !== 'TODOS' && tx.canal !== filtroCanal) return false;
+      
+      if (filtroFecha !== 'TODOS') {
+        const txDate = new Date(tx.fecha);
+        const now = new Date();
+        if (filtroFecha === 'HOY') {
+          if (txDate.toDateString() !== now.toDateString()) return false;
+        } else if (filtroFecha === 'SEMANA') {
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          if (txDate < weekAgo) return false;
+        } else if (filtroFecha === 'MES') {
+          if (txDate.getMonth() !== now.getMonth() || txDate.getFullYear() !== now.getFullYear()) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [transactions, filtroEstado, filtroCanal, filtroFecha]);
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <KpiCard
-          label="Recaudación Total del Mes"
-          value={`Bs ${formatBs(stats.totalMes)}`}
-          subValue="vs. Bs 132,400 mes anterior"
-          icon={Wallet}
-          trend={{ value: '+9.5%', up: true }}
-          accent="navy"
-        />
-        <KpiCard
-          label="Estudiantes al Día"
-          value={`${stats.alDia} / ${students.length}`}
-          subValue={`${students.length ? Math.round((stats.alDia / students.length) * 100) : 0}% de la matrícula`}
-          icon={Users}
-          trend={{ value: '+2.1%', up: true }}
-          accent="emerald"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
         <KpiCard
           label="Pagos por Validar"
           value={`${stats.porValidar} pendientes`}
@@ -152,103 +153,56 @@ export default function DashboardView({ students, transactions, pushToast }: Das
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="card p-6 lg:col-span-2">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-base font-bold text-ink-900">Recaudación Semanal por Concepto</h3>
-              <p className="text-sm text-ink-500 mt-0.5">Distribución de ingresos del último mes</p>
-            </div>
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-              <ArrowUpRight className="h-3.5 w-3.5" />
-              +12.3% vs. mes anterior
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={WEEKLY_COLLECTION} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="cMensualidad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#1b325c" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#1b325c" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="cMatricula" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3d6aaf" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3d6aaf" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="cCertificados" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#059669" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#059669" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="cTramites" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#d97706" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef0f4" vertical={false} />
-              <XAxis dataKey="semana" tick={{ fontSize: 12, fill: '#6b7588' }} axisLine={false} tickLine={false} />
-              <YAxis
-                tick={{ fontSize: 12, fill: '#6b7588' }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v) => `${formatBsShort(v)}`}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
-              <Area type="monotone" dataKey="Mensualidad" stroke="#1b325c" strokeWidth={2.5} fill="url(#cMensualidad)" />
-              <Area type="monotone" dataKey="Matricula" stroke="#3d6aaf" strokeWidth={2.5} fill="url(#cMatricula)" />
-              <Area type="monotone" dataKey="Certificados" stroke="#059669" strokeWidth={2.5} fill="url(#cCertificados)" />
-              <Area type="monotone" dataKey="Tramites" stroke="#d97706" strokeWidth={2.5} fill="url(#cTramites)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="card p-6">
-          <h3 className="text-base font-bold text-ink-900 mb-1">Resumen de Cobranza</h3>
-          <p className="text-sm text-ink-500 mb-5">Estado general de la cartera</p>
-          <div className="space-y-4">
-            {[
-              { label: 'Estudiantes al día', value: stats.alDia, total: students.length, color: 'bg-emerald-500' },
-              { label: 'Estudiantes pendientes', value: students.length - stats.alDia, total: students.length, color: 'bg-red-500' },
-              { label: 'Pagos conciliados', value: transactions.filter((t) => t.estado === 'CONCILIADO').length, total: transactions.length, color: 'bg-navy-600' },
-              { label: 'Pagos pendientes', value: transactions.filter((t) => t.estado === 'PENDIENTE').length, total: transactions.length, color: 'bg-amber-500' },
-            ].map((item) => {
-              const pct = item.total ? Math.round((item.value / item.total) * 100) : 0;
-              return (
-                <div key={item.label}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm text-ink-600">{item.label}</span>
-                    <span className="text-sm font-semibold text-ink-800">{item.value} ({pct}%)</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-ink-100 overflow-hidden">
-                    <div className={`h-full rounded-full ${item.color} transition-all duration-700`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-6 pt-5 border-t border-ink-200">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-ink-500">Total recaudado (mes)</span>
-              <span className="text-lg font-bold text-navy-800">Bs {formatBs(stats.totalMes)}</span>
-            </div>
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-sm text-ink-500">Estudiantes pendientes</span>
-              <span className="text-lg font-bold text-red-600">{students.filter((s) => s.estadoFinanciero !== 'AL DIA').length}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="card">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-200">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between px-6 py-4 border-b border-ink-200 gap-4">
           <div>
             <h3 className="text-base font-bold text-ink-900">Últimas Transacciones Registradas</h3>
-            <p className="text-sm text-ink-500 mt-0.5">Movimientos más recientes del sistema</p>
+            <p className="text-sm text-ink-500 mt-0.5">Movimientos filtrados del sistema ({filteredTransactions.length})</p>
           </div>
-          <button onClick={() => pushToast('info', 'Mostrando todas las transacciones del mes')} className="btn-ghost text-navy-700">
-            Ver todas <ArrowUpRight className="h-4 w-4" />
-          </button>
+          
+          {/* Panel de Filtros */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            <div className="flex items-center gap-1 text-xs text-ink-500 font-medium mr-1">
+              <Filter className="h-3.5 w-3.5" /> Filtros:
+            </div>
+
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="text-xs bg-ink-50 border border-ink-200 rounded-lg px-2.5 py-1.5 text-ink-700 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200"
+            >
+              <option value="TODOS">Todos los Estados</option>
+              <option value="CONCILIADO">Conciliado</option>
+              <option value="PENDIENTE">Pendiente</option>
+              <option value="REVISION">En revisión</option>
+              <option value="RECHAZADO">Rechazado</option>
+            </select>
+
+            <select
+              value={filtroCanal}
+              onChange={(e) => setFiltroCanal(e.target.value)}
+              className="text-xs bg-ink-50 border border-ink-200 rounded-lg px-2.5 py-1.5 text-ink-700 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200"
+            >
+              <option value="TODOS">Todos los Canales</option>
+              <option value="QR">QR</option>
+              <option value="DEPOSITO">Depósito</option>
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+            </select>
+
+            <select
+              value={filtroFecha}
+              onChange={(e) => setFiltroFecha(e.target.value)}
+              className="text-xs bg-ink-50 border border-ink-200 rounded-lg px-2.5 py-1.5 text-ink-700 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200"
+            >
+              <option value="TODOS">Cualquier Fecha</option>
+              <option value="HOY">Hoy</option>
+              <option value="SEMANA">Última semana</option>
+              <option value="MES">Este mes</option>
+            </select>
+          </div>
         </div>
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -257,38 +211,140 @@ export default function DashboardView({ students, transactions, pushToast }: Das
                 <th className="table-head">Concepto</th>
                 <th className="table-head">Canal</th>
                 <th className="table-head">Estado</th>
+                <th className="table-head text-center">Comprobante</th>
                 <th className="table-head text-right">Monto</th>
                 <th className="table-head">Fecha</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
-              {recentTx.map((tx) => {
-                const Icon = CHANNEL_ICONS[tx.canal] ?? Landmark;
-                return (
-                  <tr key={tx.id} className="hover:bg-ink-50 transition">
-                    <td className="table-cell">
-                      <div className="font-semibold text-ink-800">{tx.estudiante}</div>
-                      <div className="text-xs text-ink-400">{tx.ci}</div>
-                    </td>
-                    <td className="table-cell">{tx.concepto}</td>
-                    <td className="table-cell">
-                      <span className="badge-navy"><Icon className="h-3 w-3" /> {CHANNEL_LABELS[tx.canal] ?? tx.canal}</span>
-                    </td>
-                    <td className="table-cell">
-                      {tx.estado === 'CONCILIADO' && <span className="badge-green">Conciliado</span>}
-                      {tx.estado === 'PENDIENTE' && <span className="badge-yellow">Pendiente</span>}
-                      {tx.estado === 'REVISION' && <span className="badge-yellow">En revisión</span>}
-                      {tx.estado === 'RECHAZADO' && <span className="badge-red">Rechazado</span>}
-                    </td>
-                    <td className="table-cell text-right font-semibold text-ink-900">Bs {formatBs(tx.monto)}</td>
-                    <td className="table-cell text-ink-500">{timeAgo(tx.fecha)}</td>
-                  </tr>
-                );
-              })}
+              {filteredTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-8 text-sm text-ink-400">
+                    No se encontraron transacciones con los filtros seleccionados.
+                  </td>
+                </tr>
+              ) : (
+                filteredTransactions.map((tx) => {
+                  const Icon = CHANNEL_ICONS[tx.canal] ?? Landmark;
+                  
+                  // Usamos tx.comprobanteUrl (tal cual lo define database.ts)
+                  const comprobanteUrl = getPublicUrl(tx.comprobanteUrl);
+
+                  return (
+                    <tr key={tx.id} className="hover:bg-ink-50 transition">
+                      <td className="table-cell">
+                        <div className="font-semibold text-ink-800">{tx.estudiante}</div>
+                        <div className="text-xs text-ink-400">{tx.ci}</div>
+                      </td>
+                      <td className="table-cell">{tx.concepto}</td>
+                      <td className="table-cell">
+                        <span className="badge-navy"><Icon className="h-3 w-3" /> {CHANNEL_LABELS[tx.canal] ?? tx.canal}</span>
+                      </td>
+                      <td className="table-cell">
+                        {tx.estado === 'CONCILIADO' && <span className="badge-green">Conciliado</span>}
+                        {tx.estado === 'PENDIENTE' && <span className="badge-yellow">Pendiente</span>}
+                        {tx.estado === 'REVISION' && <span className="badge-yellow">En revisión</span>}
+                        {tx.estado === 'RECHAZADO' && <span className="badge-red">Rechazado</span>}
+                      </td>
+                      <td className="table-cell text-center">
+                        {comprobanteUrl ? (
+                          <div
+                            onClick={() => {
+                              setPreviewImage({
+                                url: comprobanteUrl,
+                                title: `Comprobante - ${tx.estudiante}`,
+                                subtitle: `${tx.concepto} • Bs ${formatBs(tx.monto)}`
+                              });
+                              pushToast('info', `Abriendo comprobante de ${tx.estudiante}`);
+                            }}
+                            className="relative group w-10 h-10 mx-auto rounded-lg overflow-hidden border border-ink-200 cursor-pointer bg-ink-50 hover:border-navy-500 transition shadow-sm flex items-center justify-center"
+                            title="Ver comprobante"
+                          >
+                            <img
+                              src={comprobanteUrl}
+                              alt="Comprobante"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const parent = e.currentTarget.parentElement;
+                                if (parent && !parent.querySelector('.fallback-txt')) {
+                                  const span = document.createElement('span');
+                                  span.className = 'fallback-txt text-[10px] text-navy-700 font-bold underline px-1 text-center';
+                                  span.innerText = 'Ver';
+                                  parent.appendChild(span);
+                                }
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                              <Eye className="h-4 w-4" />
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-ink-400 italic">Sin archivo</span>
+                        )}
+                      </td>
+                      <td className="table-cell text-right font-semibold text-ink-900">Bs {formatBs(tx.monto)}</td>
+                      <td className="table-cell text-ink-500">{timeAgo(tx.fecha)}</td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Visor Lightbox para la imagen del comprobante */}
+      {previewImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/75 backdrop-blur-md" onClick={() => setPreviewImage(null)}>
+          <div className="relative max-w-lg w-full bg-white rounded-2xl p-4 shadow-2xl flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full flex items-center justify-between mb-3 pb-2 border-b border-ink-100">
+              <div>
+                <h4 className="font-bold text-ink-900 text-sm truncate">{previewImage.title}</h4>
+                <p className="text-xs text-ink-500 mt-0.5">{previewImage.subtitle}</p>
+              </div>
+              <button onClick={() => setPreviewImage(null)} className="h-8 w-8 rounded-lg flex items-center justify-center bg-ink-100 hover:bg-ink-200 text-ink-600 transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            
+            <div className="overflow-auto max-h-[65vh] w-full flex items-center justify-center bg-ink-50 rounded-xl p-2 border border-ink-200 min-h-[250px]">
+              <img
+                src={previewImage.url}
+                alt="Comprobante ampliado"
+                className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-sm"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  if (parent && !parent.querySelector('.error-msg')) {
+                    const errDiv = document.createElement('div');
+                    errDiv.className = 'error-msg flex flex-col items-center justify-center text-ink-400 gap-2 p-8 text-xs';
+                    errDiv.innerText = 'No se pudo cargar la imagen del comprobante.';
+                    parent.appendChild(errDiv);
+                  }
+                }}
+              />
+            </div>
+
+            <div className="mt-4 flex items-center justify-end w-full gap-2">
+              <a
+                href={previewImage.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-navy-700 bg-navy-50 hover:bg-navy-100 rounded-xl transition"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Abrir en pestaña
+              </a>
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-navy-900 hover:bg-navy-800 rounded-xl transition shadow-sm"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

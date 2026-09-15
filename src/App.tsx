@@ -7,6 +7,7 @@ import DashboardView from '@/views/DashboardView';
 import ReconciliationView from '@/views/ReconciliationView';
 import WindowView from '@/views/WindowView';
 import StudentsView from '@/views/StudentsView';
+import ReportsView from '@/views/ReportsView'; // <--- Importado correctamente
 import FeesView from '@/views/FeesView';
 import AuthView from '@/views/AuthView';
 import { supabase } from '@/lib/supabase';
@@ -14,11 +15,12 @@ import { loadStudents, loadFees, loadScholarships, loadPayments } from '@/lib/da
 import type { ModuleId, Student, FeeItem, ScholarshipType, Transaction } from '@/types';
 
 const MODULE_META: Record<ModuleId, { title: string; subtitle: string }> = {
-  dashboard: { title: 'Vista General', subtitle: 'Resumen ejecutivo de la plataforma universitaria' },
+  dashboard: { title: 'Transacciones', subtitle: 'Resumen ejecutivo de la plataforma universitaria' },
   reconciliation: { title: 'Conciliación Bancaria', subtitle: 'Cruce de extractos bancarios con pagos de mensualidades y aranceles' },
-  window: { title: 'Ventanilla / Caja', subtitle: 'Registro de pagos en efectivo y carga masiva de recibos' },
+  window: { title: 'Administracion / Caja', subtitle: 'Registro de pagos en efectivo y carga masiva de recibos' },
   students: { title: 'Estudiantes', subtitle: 'Gestión de alumnos y estado de cuenta' },
   fees: { title: 'Aranceles y Becas', subtitle: 'Configuración de precios oficiales, becas y requisitos' },
+  rep: { title: 'Reportes y Estadisticas', subtitle: 'KPIs y reportes estratégicos para administración y directorio' },
 };
 
 export default function App() {
@@ -157,6 +159,15 @@ export default function App() {
               )}
               {activeModule === 'fees' && (
                 <FeesView fees={fees} setFees={setFees} scholarships={scholarships} setScholarships={setScholarships} students={students} pushToast={push} />
+              )}
+              {/* <--- AQUÍ FALTABA AGREGAR LA RENDERIZACIÓN DE REPORTSVIEW ---> */}
+              {activeModule === 'rep' && (
+                <ReportsView 
+                  students={students} 
+                  scholarships={scholarships} 
+                  transactions={transactions} 
+                  pushToast={push} 
+                />
               )}
             </>
           )}

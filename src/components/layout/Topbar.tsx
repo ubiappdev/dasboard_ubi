@@ -46,15 +46,7 @@ export default function Topbar({
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="relative w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-            <input
-              type="text"
-              placeholder={searchPlaceholder}
-              onChange={(e) => onSearch?.(e.target.value)}
-              className="input pl-9"
-            />
-          </div>
+          
 
           <div className="hidden lg:flex items-center gap-2 rounded-lg bg-ink-50 border border-ink-200 px-3 py-2 text-sm text-ink-600">
             <Calendar className="h-4 w-4 text-ink-400" />
