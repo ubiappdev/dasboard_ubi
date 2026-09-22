@@ -1,0 +1,54 @@
+INSERT INTO public.alumnos_mensualidades (
+    alumno_id,
+    gestion_anio,
+    nro_cuota,
+    mes_referencia,
+    monto_original,
+    monto_con_descuento,
+    estado,
+    fecha_vencimiento
+)
+SELECT 
+    a.id AS alumno_id,
+    2026 AS gestion_anio,
+    m.nro_cuota,
+    m.mes_referencia,
+    -- 1. Monto original según el curso del alumno
+    CASE 
+        WHEN a.curso_id::text = '1' THEN 300.00
+        WHEN a.curso_id::text = '2' THEN 350.00
+        WHEN a.curso_id::text = '3' THEN 400.00
+        WHEN a.curso_id::text = '4' THEN 450.00
+        ELSE 300.00 
+    END AS monto_original,
+    -- 2. Monto con descuento calculado automáticamente usando el porcentaje de la tabla tipos_beca
+    ROUND(
+        (
+            CASE 
+                WHEN a.curso_id::text = '1' THEN 300.00
+                WHEN a.curso_id::text = '2' THEN 350.00
+                WHEN a.curso_id::text = '3' THEN 400.00
+                WHEN a.curso_id::text = '4' THEN 450.00
+                ELSE 300.00 
+            END
+        ) * (1.0 - COALESCE(tb.porcentaje_descuento, 0.00) / 100.0), 
+        2
+    ) AS monto_con_descuento,
+    'PENDIENTE' AS estado,
+    m.fecha_vencimiento
+FROM public.alumnos a
+-- Conectamos con la nueva tabla de tipos de beca secuencial
+LEFT JOIN public.tipos_beca tb ON tb.id = a.tipo_beca_id
+CROSS JOIN (
+    VALUES 
+        (1,  'MARZO',     DATE '2026-03-16'),
+        (2,  'ABRIL',     DATE '2026-04-16'),
+        (3,  'MAYO',      DATE '2026-05-16'),
+        (4,  'JUNIO',     DATE '2026-06-16'),
+        (5,  'JULIO',     DATE '2026-07-16'),
+        (6,  'AGOSTO',    DATE '2026-08-16'),
+        (7,  'SEPTIEMBRE',DATE '2026-09-16'),
+        (8,  'OCTUBRE',   DATE '2026-10-16'),
+        (9,  'NOVIEMBRE', DATE '2026-11-16'),
+        (10, 'DICIEMBRE', DATE '2026-12-16')
+) AS m(nro_cuota, mes_referencia, fecha_vencimiento);

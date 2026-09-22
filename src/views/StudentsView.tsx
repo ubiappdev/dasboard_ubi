@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye, Filter, FileText, Send } from 'lucide-react';
+import { Users, Search, Upload, ChevronLeft, ChevronRight, Award, Download, History, X, Eye, Filter, FileText, Send, UserPlus, Database } from 'lucide-react';
 import type { Student, ScholarshipType, ToastPush, Transaction } from '@/types';
 import { formatBs, formatDate } from '@/lib/format';
 import Modal from '@/components/ui/Modal';
@@ -10,6 +10,8 @@ interface StudentsViewProps {
   scholarships: ScholarshipType[];
   transactions: Transaction[];
   pushToast: ToastPush;
+  /** Opcional: se llama después de crear un alumno para que el padre recargue la lista. */
+  onStudentCreated?: () => void;
 }
 
 interface ExportRow {
@@ -18,7 +20,58 @@ interface ExportRow {
   payment?: Transaction;
 }
 
+// ---- Nuevo alumno ----
+interface NewStudentForm {
+  ci: string;
+  nombres: string;
+  apellidos: string;
+  correo_electronico: string;
+  telefono: string;
+  estado_financiero: string;
+  estado: string;
+  becado: boolean;
+  tipo_beca_id: string;
+  carrera_id: string;
+  curso_id: string;
+  turno_id: string;
+  modalidad: string;
+}
+
+const EMPTY_STUDENT_FORM: NewStudentForm = {
+  ci: '',
+  nombres: '',
+  apellidos: '',
+  correo_electronico: '',
+  telefono: '',
+  estado_financiero: 'AL DIA',
+  estado: 'ACTIVO',
+  becado: false,
+  tipo_beca_id: '',
+  carrera_id: '',
+  curso_id: '',
+  turno_id: '',
+  modalidad: '',
+};
+
+// ---- Caja histórico ----
+interface CajaHistoricoRow {
+  id: string;
+  nro_transaccion: string | null;
+  fecha: string | null;
+  alumno_texto: string | null;
+  carrera: string | null;
+  anio_curso: string | null;
+  recibo_factura: string | null;
+  importe: string | null;
+  observaciones: string | null;
+  concepto_general: string | null;
+  tipo_comprobante: string | null;
+  importado_el: string | null;
+  ci: string | null;
+}
+
 const PAGE_SIZE = 12;
+const HISTORICO_PAGE_SIZE = 15;
 const COMPROBANTES_BUCKET = 'comprobantes';
 
 function getPaymentYear(payment: Transaction): string {
@@ -188,7 +241,7 @@ function exportToPdf(rows: ExportRow[], title: string) {
   printWindow.document.close();
 }
 
-export default function StudentsView({ students, scholarships, transactions, pushToast }: StudentsViewProps) {
+export default function StudentsView({ students, scholarships, transactions, pushToast, onStudentCreated }: StudentsViewProps) {
   const [search, setSearch] = useState('');
   const [career, setCareer] = useState('all');
   const [status, setStatus] = useState('all');
@@ -208,6 +261,20 @@ export default function StudentsView({ students, scholarships, transactions, pus
   // Estados locales para el mensaje individual dentro del modal
   const [individualMessage, setIndividualMessage] = useState('');
   const [sendingIndividual, setSendingIndividual] = useState(false);
+
+  // Estados del formulario de nuevo alumno
+  const [showNewStudent, setShowNewStudent] = useState(false);
+  const [newStudent, setNewStudent] = useState<NewStudentForm>(EMPTY_STUDENT_FORM);
+  const [savingStudent, setSavingStudent] = useState(false);
+
+  // Estados del modal de caja_historico (solo registros con ci nulo)
+  const [showHistorico, setShowHistorico] = useState(false);
+  const [historico, setHistorico] = useState<CajaHistoricoRow[]>([]);
+  const [historicoTotal, setHistoricoTotal] = useState(0);
+  const [historicoPage, setHistoricoPage] = useState(0);
+  const [historicoSearch, setHistoricoSearch] = useState('');
+  const [historicoQuery, setHistoricoQuery] = useState('');
+  const [loadingHistorico, setLoadingHistorico] = useState(false);
 
   const paymentChannels = useMemo(() => {
     return Array.from(new Set(transactions.map((t) => t.canal))).filter(Boolean).sort();
@@ -272,6 +339,123 @@ export default function StudentsView({ students, scholarships, transactions, pus
 
     fetchCajasRecibos();
   }, [selectedStudent, selectedPayments]);
+
+  // Debounce de la búsqueda del histórico
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setHistoricoQuery(historicoSearch);
+      setHistoricoPage(0);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [historicoSearch]);
+
+  // Carga de caja_historico con ci nulo (paginado en el servidor)
+  useEffect(() => {
+    if (!showHistorico) return;
+    let cancelled = false;
+
+    async function fetchHistorico() {
+      setLoadingHistorico(true);
+      try {
+        let query = supabase
+          .from('caja_historico')
+          .select('*', { count: 'exact' })
+          .is('ci', null);
+
+        const q = historicoQuery.trim().replace(/[,()%]/g, ' ');
+        if (q) {
+          query = query.or(`alumno_texto.ilike.%${q}%,nro_transaccion.ilike.%${q}%,recibo_factura.ilike.%${q}%`);
+        }
+
+        const from = historicoPage * HISTORICO_PAGE_SIZE;
+        const { data, error, count } = await query
+          .order('importado_el', { ascending: false })
+          .range(from, from + HISTORICO_PAGE_SIZE - 1);
+
+        if (cancelled) return;
+        if (error) throw error;
+
+        setHistorico((data as CajaHistoricoRow[]) ?? []);
+        setHistoricoTotal(count ?? 0);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Error al consultar caja_historico:', err);
+        pushToast('error', 'No se pudo cargar el histórico de caja.');
+      } finally {
+        if (!cancelled) setLoadingHistorico(false);
+      }
+    }
+
+    fetchHistorico();
+    return () => { cancelled = true; };
+  }, [showHistorico, historicoPage, historicoQuery]);
+
+  const historicoPages = Math.max(1, Math.ceil(historicoTotal / HISTORICO_PAGE_SIZE));
+
+  const openHistorico = () => {
+    setHistoricoSearch('');
+    setHistoricoQuery('');
+    setHistoricoPage(0);
+    setShowHistorico(true);
+  };
+
+  const closeNewStudent = () => {
+    setShowNewStudent(false);
+    setNewStudent(EMPTY_STUDENT_FORM);
+  };
+
+  const updateNewStudent = <K extends keyof NewStudentForm>(key: K, value: NewStudentForm[K]) => {
+    setNewStudent((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleCreateStudent = async () => {
+    const ci = newStudent.ci.trim();
+    const nombres = newStudent.nombres.trim();
+    const apellidos = newStudent.apellidos.trim();
+
+    if (!ci || !nombres || !apellidos) {
+      pushToast('warning', 'CI, nombres y apellidos son obligatorios.');
+      return;
+    }
+
+    setSavingStudent(true);
+    try {
+      const payload = {
+        ci,
+        nombres,
+        apellidos,
+        correo_electronico: newStudent.correo_electronico.trim() || null,
+        telefono: newStudent.telefono.trim() || null,
+        estado_financiero: newStudent.estado_financiero,
+        estado: newStudent.estado,
+        becado: newStudent.becado,
+        tipo_beca_id: newStudent.becado && newStudent.tipo_beca_id ? Number(newStudent.tipo_beca_id) : null,
+        carrera_id: newStudent.carrera_id.trim() || null,
+        curso_id: newStudent.curso_id.trim() || null,
+        turno_id: newStudent.turno_id.trim() || null,
+        modalidad: newStudent.modalidad.trim() || null,
+      };
+
+      const { error } = await supabase.from('alumnos').insert(payload);
+
+      if (error) {
+        if ((error as any).code === '23505') {
+          pushToast('error', `Ya existe un alumno registrado con el CI ${ci}.`);
+          return;
+        }
+        throw error;
+      }
+
+      pushToast('success', `Alumno ${nombres} ${apellidos} registrado correctamente.`);
+      closeNewStudent();
+      onStudentCreated?.();
+    } catch (err: any) {
+      console.error('Error al crear alumno:', err);
+      pushToast('error', 'Ocurrió un error al registrar el alumno.');
+    } finally {
+      setSavingStudent(false);
+    }
+  };
 
   const handleExport = (exportRows: ExportRow[], fileName: string) => {
     if (!exportRows.length) {
@@ -387,6 +571,12 @@ export default function StudentsView({ students, scholarships, transactions, pus
             </div>
             
             <div className="flex flex-wrap gap-2">
+              <button className="btn-primary" onClick={() => setShowNewStudent(true)}>
+                <UserPlus className="h-4 w-4" /> Nuevo alumno
+              </button>
+              <button className="btn-secondary" onClick={openHistorico}>
+                <Database className="h-4 w-4 text-navy-600" /> Caja histórico
+              </button>
               <button className="btn-secondary" onClick={() => pushToast('info', 'La importación de estudiantes estará disponible en el siguiente paso.')}>
                 <Upload className="h-4 w-4" /> Importar
               </button>
@@ -658,6 +848,191 @@ export default function StudentsView({ students, scholarships, transactions, pus
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal: formulario de nuevo alumno */}
+      <Modal
+        open={showNewStudent}
+        onClose={closeNewStudent}
+        title="Nuevo alumno"
+        subtitle="Completa los datos para registrarlo en la tabla de alumnos"
+        size="xl"
+        icon={<UserPlus className="h-5 w-5" />}
+      >
+        <form
+          className="space-y-5"
+          onSubmit={(e) => { e.preventDefault(); handleCreateStudent(); }}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">CI *</label>
+              <input className="input" value={newStudent.ci} onChange={(e) => updateNewStudent('ci', e.target.value)} maxLength={30} placeholder="Ej. 1234567" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Nombres *</label>
+              <input className="input" value={newStudent.nombres} onChange={(e) => updateNewStudent('nombres', e.target.value)} maxLength={100} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Apellidos *</label>
+              <input className="input" value={newStudent.apellidos} onChange={(e) => updateNewStudent('apellidos', e.target.value)} maxLength={100} />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Correo electrónico</label>
+              <input type="email" className="input" value={newStudent.correo_electronico} onChange={(e) => updateNewStudent('correo_electronico', e.target.value)} maxLength={150} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Teléfono</label>
+              <input className="input" value={newStudent.telefono} onChange={(e) => updateNewStudent('telefono', e.target.value)} maxLength={30} />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Carrera (ID)</label>
+              <input className="input" value={newStudent.carrera_id} onChange={(e) => updateNewStudent('carrera_id', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Curso (ID)</label>
+              <input className="input" value={newStudent.curso_id} onChange={(e) => updateNewStudent('curso_id', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Turno (ID)</label>
+              <input className="input" value={newStudent.turno_id} onChange={(e) => updateNewStudent('turno_id', e.target.value)} />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Modalidad</label>
+              <input className="input" value={newStudent.modalidad} onChange={(e) => updateNewStudent('modalidad', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Estado financiero</label>
+              <select className="input" value={newStudent.estado_financiero} onChange={(e) => updateNewStudent('estado_financiero', e.target.value)}>
+                <option value="AL DIA">Al día</option>
+                <option value="PENDIENTE">Pendiente</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-600 mb-1">Estado</label>
+              <select className="input" value={newStudent.estado} onChange={(e) => updateNewStudent('estado', e.target.value)}>
+                <option value="ACTIVO">Activo</option>
+                <option value="INACTIVO">Inactivo</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-ink-200 bg-ink-50 p-3 flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-ink-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newStudent.becado}
+                onChange={(e) => {
+                  updateNewStudent('becado', e.target.checked);
+                  if (!e.target.checked) updateNewStudent('tipo_beca_id', '');
+                }}
+              />
+              Alumno becado
+            </label>
+            {newStudent.becado && (
+              <select className="input w-auto" value={newStudent.tipo_beca_id} onChange={(e) => updateNewStudent('tipo_beca_id', e.target.value)}>
+                <option value="">Selecciona el tipo de beca</option>
+                {scholarships.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-secondary" onClick={closeNewStudent} disabled={savingStudent}>
+              <X className="h-4 w-4" /> Cancelar
+            </button>
+            <button type="submit" className="btn-primary" disabled={savingStudent}>
+              <UserPlus className="h-4 w-4" /> {savingStudent ? 'Guardando...' : 'Guardar alumno'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: caja_historico (solo registros con ci nulo) */}
+      <Modal
+        open={showHistorico}
+        onClose={() => setShowHistorico(false)}
+        title="Caja histórico sin CI"
+        subtitle="Registros de caja que todavía no están asociados a un alumno"
+        size="xl"
+        icon={<Database className="h-5 w-5" />}
+      >
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
+              <input
+                value={historicoSearch}
+                onChange={(e) => setHistoricoSearch(e.target.value)}
+                className="input pl-9"
+                placeholder="Buscar por alumno, transacción o recibo"
+              />
+            </div>
+            <span className="text-sm text-ink-500">{historicoTotal} registros sin CI</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="table-head">Fecha</th>
+                  <th className="table-head">N° Transacción</th>
+                  <th className="table-head">Alumno</th>
+                  <th className="table-head">Carrera</th>
+                  <th className="table-head">Año / curso</th>
+                  <th className="table-head">Recibo / factura</th>
+                  <th className="table-head text-right">Importe</th>
+                  <th className="table-head">Concepto</th>
+                  <th className="table-head">Comprobante</th>
+                  <th className="table-head">Observaciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {loadingHistorico ? (
+                  <tr>
+                    <td colSpan={10} className="table-cell text-center text-ink-400 animate-pulse py-8">Cargando registros...</td>
+                  </tr>
+                ) : historico.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="table-cell text-center text-ink-500 py-8">No hay registros sin CI con esa búsqueda.</td>
+                  </tr>
+                ) : (
+                  historico.map((row) => (
+                    <tr key={row.id} className="hover:bg-ink-50">
+                      <td className="table-cell whitespace-nowrap">{row.fecha ?? '—'}</td>
+                      <td className="table-cell">{row.nro_transaccion ?? '—'}</td>
+                      <td className="table-cell font-medium">{row.alumno_texto ?? '—'}</td>
+                      <td className="table-cell">{row.carrera ?? '—'}</td>
+                      <td className="table-cell">{row.anio_curso ?? '—'}</td>
+                      <td className="table-cell">{row.recibo_factura ?? '—'}</td>
+                      <td className="table-cell text-right font-semibold whitespace-nowrap">{row.importe ?? '—'}</td>
+                      <td className="table-cell">{row.concepto_general ?? '—'}</td>
+                      <td className="table-cell">{row.tipo_comprobante ?? '—'}</td>
+                      <td className="table-cell">{row.observaciones ?? '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-ink-200">
+            <div className="flex items-center gap-2">
+              <button className="btn-secondary" disabled={historicoPage === 0 || loadingHistorico} onClick={() => setHistoricoPage((v) => Math.max(0, v - 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-sm">Página {historicoPage + 1} de {historicoPages}</span>
+              <button className="btn-secondary" disabled={historicoPage >= historicoPages - 1 || loadingHistorico} onClick={() => setHistoricoPage((v) => Math.min(historicoPages - 1, v + 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            <button className="btn-secondary" onClick={() => setShowHistorico(false)}>
+              <X className="h-4 w-4" /> Cerrar
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {previewImage && (

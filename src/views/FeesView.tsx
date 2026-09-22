@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Award, DollarSign, Plus, Save, Tag, Edit2, X } from 'lucide-react';
+import { Award, DollarSign, Plus, Save, Tag, Edit2, X, Database, UploadCloud, CheckCircle2 } from 'lucide-react';
 import type { FeeItem, ScholarshipType, Student, ToastPush } from '@/types';
 import { formatBs } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +13,39 @@ interface FeesViewProps {
   pushToast: ToastPush;
 }
 
+/**
+ * Función para extraer números de cuota usando Expresiones Regulares (Regex) flexible.
+ * Detecta formatos como: "1º cuota", "1ra cuota", "primera cuota", "cuota 1", o rangos "1º a la 10º cuota".
+ */
+function extraerCuotas(texto: string): number[] {
+    if (!texto) return [];
+    const upperText = texto.toUpperCase();
+    const cuotasSet = new Set<number>();
+
+    // Patrón 1: Rangos del tipo "1º A LA 10º CUOTA" o "1 AL 5"
+    const rangoMatch = upperText.match(/(\d+)[ºªRAER]*\s*(?:A|AL|HASTA)\s*(\d+)[ºªRAER]*\s*CUOTA/);
+    if (rangoMatch) {
+        const inicio = parseInt(rangoMatch[1], 10);
+        const fin = parseInt(rangoMatch[2], 10);
+        for (let i = inicio; i <= fin; i++) {
+            cuotasSet.add(i);
+        }
+    }
+
+    // Patrón 2: Cuotas individuales o múltiples sueltas (Ej: "1º, 2º Y 3º CUOTA" o "1RA Y 2DA")
+    const matches = upperText.matchAll(/(\d+)[ºªRAER]*\s*CUOTA/g);
+    for (const match of matches) {
+        cuotasSet.add(parseInt(match[1], 10));
+    }
+
+    // Patrón 3: Si menciona "PRIMERA" en texto plano
+    if (upperText.includes('PRIMERA')) cuotasSet.add(1);
+    if (upperText.includes('SEGUNDA')) cuotasSet.add(2);
+    if (upperText.includes('TERCERA')) cuotasSet.add(3);
+
+    return Array.from(cuotasSet).sort((a, b) => a - b);
+}
+
 export default function FeesView({ fees, setFees, scholarships, setScholarships, students, pushToast }: FeesViewProps) {
   const [tab, setTab] = useState<'fees' | 'scholarships' | 'other'>('fees');
   const [category, setCategory] = useState<string>('all');
@@ -23,6 +56,10 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
 
   const [editingScholarshipId, setEditingScholarshipId] = useState<string | null>(null);
   const [newScholarship, setNewScholarship] = useState({ nombre: '', porcentaje: '', descripcion: '' });
+
+  // Estados específicos para el proceso de migración en la pestaña 'other'
+  const [migrando, setMigrando] = useState(false);
+  const [progresoMigracion, setProgresoMigracion] = useState<string>('');
 
   const shownFees = useMemo(() => fees.filter((fee) => category === 'all' || fee.categoria === category), [fees, category]);
 
@@ -50,7 +87,6 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
     }
 
     if (editingFeeId) {
-      // Editar arancel existente
       const { data, error } = await supabase
         .from('aranceles_conceptos')
         .update({
@@ -81,7 +117,6 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
       pushToast('success', 'Arancel actualizado correctamente.');
       handleCancelFeeEdit();
     } else {
-      // Crear nuevo arancel
       const { data, error } = await supabase
         .from('aranceles_conceptos')
         .insert({
@@ -137,7 +172,6 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
     }
 
     if (editingScholarshipId) {
-      // Editar beca existente
       const { data, error } = await supabase
         .from('tipos_beca')
         .update({
@@ -166,7 +200,6 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
       pushToast('success', 'Beca actualizada correctamente.');
       handleCancelScholarshipEdit();
     } else {
-      // Crear nueva beca
       const { data, error } = await supabase
         .from('tipos_beca')
         .insert({
@@ -194,6 +227,110 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
 
       setNewScholarship({ nombre: '', porcentaje: '', descripcion: '' });
       pushToast('success', 'Beca guardada en la base de datos.');
+    }
+  };
+
+  // --- PROCESO DE MIGRACIÓN REAL (PESTAÑA OTROS) ---
+  const ejecutarProcesoMigracion = async () => {
+    try {
+      setMigrando(true);
+      setProgresoMigracion('Iniciando migración y conciliación de caja_historico...');
+
+      // 1. Obtener registros del histórico que ya tienen CI asociado
+      const { data: historicos, error: errHist } = await supabase
+        .from('caja_historico')
+        .select('*')
+        .not('ci', 'is', null)
+        .neq('ci', '');
+
+      if (errHist) {
+        console.error('Error al leer caja_historico:', errHist);
+        pushToast('error', 'Error al leer la tabla caja_historico.');
+        setProgresoMigracion('Error al leer caja_historico.');
+        return;
+      }
+
+      const totalRegistros = historicos?.length || 0;
+      setProgresoMigracion(`Se encontraron ${totalRegistros} registros con CI. Procesando...`);
+
+      let procesados = 1;
+      for (const item of (historicos || [])) {
+        try {
+          setProgresoMigracion(`Procesando (${procesados}/${totalRegistros}) - CI: ${item.ci}`);
+          procesados++;
+
+          // A. Buscar el alumno_id oficial usando el CI y la Carrera
+          const { data: alumnoData, error: errAlumno } = await supabase
+            .from('alumnos')
+            .select('id')
+            .eq('ci', item.ci)
+            .eq('carrera_id', item.carrera)
+            .single();
+
+          if (errAlumno || !alumnoData) {
+            console.warn(`[Advertencia] No se encontró alumno para CI: ${item.ci}, Carrera: ${item.carrera}`);
+            continue;
+          }
+
+          const alumnoId = alumnoData.id;
+          const importeTotal = parseFloat(item.importe) || 0;
+          const observaciones = item.observaciones || '';
+          const conceptoGeneral = item.concepto_general || '';
+
+          // B. Insertar la cabecera en alumnos_pagos
+          const { data: pagoInsertado, error: errPago } = await supabase
+            .from('alumnos_pagos')
+            .insert({
+              alumno_id: alumnoId,
+              monto_pagado: importeTotal,
+              canal_pago: 'EFECTIVO',
+              numero_transaccion: item.recibo_factura ? String(item.recibo_factura) : null,
+              fecha_pago: item.fecha ? new Date(item.fecha.split('/').reverse().join('-')).toISOString() : new Date().toISOString(),
+              estado_conciliacion: 'APROBADO',
+              concepto: conceptoGeneral,
+              observacion: observaciones
+            })
+            .select('id')
+            .single();
+
+          if (errPago) {
+            console.error(`Error al insertar pago para recibo ${item.recibo_factura}:`, errPago.message);
+            continue;
+          }
+
+          // C. Analizar si el recibo contiene mensualidades/cuotas usando nuestra Regex
+          const cuotasDetectadas = extraerCuotas(`${conceptoGeneral} ${observaciones}`);
+
+          if (cuotasDetectadas.length > 0) {
+            for (const nroCuota of cuotasDetectadas) {
+              const { data: mensualidad, error: errMens } = await supabase
+                .from('alumnos_mensualidades')
+                .select('id, monto_original')
+                .eq('alumno_id', alumnoId)
+                .eq('nro_cuota', nroCuota)
+                .single();
+
+              if (!errMens && mensualidad) {
+                await supabase
+                  .from('alumnos_mensualidades')
+                  .update({ estado: 'PAGADO' })
+                  .eq('id', mensualidad.id);
+              }
+            }
+          }
+        } catch (itemError) {
+          console.error(`Excepción procesando registro ID ${item.id}:`, itemError);
+        }
+      }
+
+      setProgresoMigracion('¡Migración y conciliación finalizada con éxito!');
+      pushToast('success', 'El proceso de migración finalizó correctamente.');
+    } catch (error) {
+      console.error(error);
+      pushToast('error', 'Ocurrió un error durante la migración.');
+      setProgresoMigracion('Error en la ejecución.');
+    } finally {
+      setMigrando(false);
     }
   };
 
@@ -331,9 +468,41 @@ export default function FeesView({ fees, setFees, scholarships, setScholarships,
       )}
 
       {tab === 'other' && (
-        <div className="card p-8">
-          <h3 className="font-bold text-ink-900">Otros conceptos</h3>
-          <p className="text-sm text-ink-500 mt-2">Esta sección queda separada de mensualidades y becas para administrar certificados, graduación y otros cargos sin mezclarlos con la conciliación de pagos.</p>
+        <div className="card p-8 space-y-6">
+          <div className="flex items-center gap-3 border-b pb-4">
+            <div className="h-12 w-12 rounded-xl bg-navy-50 text-navy-700 flex items-center justify-center">
+              <Database className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-ink-900">Proceso de Migración de Datos</h3>
+              <p className="text-sm text-ink-500">Herramienta dedicada para conciliar y transferir registros históricos de caja hacia el sistema actual.</p>
+            </div>
+          </div>
+
+          <div className="bg-ink-50 p-5 rounded-lg border border-ink-200 space-y-4">
+            <h4 className="font-semibold text-ink-800 text-sm flex items-center gap-2">
+              <UploadCloud className="h-4 w-4 text-navy-600" /> Control de Migración
+            </h4>
+            <p className="text-xs text-ink-600">
+              Al hacer clic en el botón se leerán los registros de <code className="bg-white px-1 py-0.5 rounded border">caja_historico</code>, se asociarán con los alumnos mediante su CI y carrera, y se registrarán los pagos y cuotas correspondientes en Supabase.
+            </p>
+
+            {progresoMigracion && (
+              <div className="p-3 bg-white border rounded-md text-xs font-mono text-navy-800 flex items-center gap-2 shadow-sm">
+                <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                <span>{progresoMigracion}</span>
+              </div>
+            )}
+
+            <button 
+              onClick={ejecutarProcesoMigracion} 
+              disabled={migrando}
+              className="btn-primary flex items-center gap-2"
+            >
+              <UploadCloud className="h-4 w-4" />
+              {migrando ? 'Ejecutando migración...' : 'Iniciar Proceso de Migración'}
+            </button>
+          </div>
         </div>
       )}
     </div>

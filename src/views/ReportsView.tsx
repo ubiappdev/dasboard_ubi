@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   AlertCircle, 
   PieChart as PieIcon, 
-  Briefcase 
+  Briefcase,
+  Filter
 } from 'lucide-react';
 import type { Student, ScholarshipType, Transaction } from '@/types';
 import { formatBs, formatDate } from '@/lib/format';
@@ -28,8 +29,13 @@ function getPaymentYear(payment: Transaction): string {
 }
 
 export default function ReportsView({ students, scholarships, transactions, pushToast }: ReportsViewProps) {
-  const [activeTab, setActiveTab] = useState<'ejecutivo' | 'operativo'>('ejecutivo');
+  const [activeTab, setActiveTab] = useState<'ejecutivo' | 'operativo' | 'consolidado'>('ejecutivo');
   const [gestionFilter, setGestionFilter] = useState('all');
+
+  // Estados específicos para los filtros de la nueva vista de Consolidado
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [canalFilter, setCanalFilter] = useState('all');
 
   // Años disponibles basados en transacciones
   const years = useMemo(() => {
@@ -37,7 +43,7 @@ export default function ReportsView({ students, scholarships, transactions, push
     return Array.from(setYears).sort((a, b) => Number(b) - Number(a));
   }, [transactions]);
 
-  // Transacciones filtradas por gestión
+  // Transacciones filtradas por gestión global
   const filteredTransactions = useMemo(() => {
     if (gestionFilter === 'all') return transactions;
     return transactions.filter(t => getPaymentYear(t) === gestionFilter);
@@ -98,6 +104,31 @@ export default function ReportsView({ students, scholarships, transactions, push
     });
     return Object.entries(map);
   }, [filteredTransactions]);
+
+  // Transacciones filtradas para el Consolidado (Fecha + Canal)
+  const transactionsConsolidado = useMemo(() => {
+    return filteredTransactions.filter(t => {
+      const matchesCanal = canalFilter === 'all' || t.canal === canalFilter;
+      if (!matchesCanal) return false;
+      
+      if (!fechaInicio && !fechaFin) return true;
+      
+      const fechaPago = t.fecha ? t.fecha.split('T')[0] : '';
+      if (!fechaPago) return false;
+      
+      if (fechaInicio && fechaPago < fechaInicio) return false;
+      if (fechaFin && fechaPago > fechaFin) return false;
+      
+      return true;
+    });
+  }, [filteredTransactions, fechaInicio, fechaFin, canalFilter]);
+
+  // Totales recalculados según filtro del Consolidado
+  const totalConsolidadoFiltrado = useMemo(() => {
+    return transactionsConsolidado
+      .filter(t => t.estado === 'CONCILIADO' || t.estado === 'APROBADO')
+      .reduce((acc, t) => acc + (Number(t.monto) || 0), 0);
+  }, [transactionsConsolidado]);
 
   // Exportar Reporte Ejecutivo a PDF (Directorio)
   const handleExportEjecutivoPdf = () => {
@@ -232,7 +263,7 @@ export default function ReportsView({ students, scholarships, transactions, push
 
   return (
     <div className="space-y-6">
-      {/* Cabecera y Selector de Gestión / Pestañas */}
+      {/* Cabecera y Selector de Gestión */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 card p-5 bg-gradient-to-r from-navy-900 to-navy-800 text-white">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
@@ -259,11 +290,11 @@ export default function ReportsView({ students, scholarships, transactions, push
         </div>
       </div>
 
-      {/* Selector de Vistas (Directorio vs Administración) */}
-      <div className="flex border-b border-ink-200 gap-6">
+      {/* Selector de Vistas (Directorio vs Administración vs Consolidado) */}
+      <div className="flex border-b border-ink-200 gap-6 overflow-x-auto">
         <button
           onClick={() => setActiveTab('ejecutivo')}
-          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition ${
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition whitespace-nowrap ${
             activeTab === 'ejecutivo' 
               ? 'border-navy-700 text-navy-900' 
               : 'border-transparent text-ink-500 hover:text-ink-800'
@@ -273,13 +304,23 @@ export default function ReportsView({ students, scholarships, transactions, push
         </button>
         <button
           onClick={() => setActiveTab('operativo')}
-          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition ${
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition whitespace-nowrap ${
             activeTab === 'operativo' 
               ? 'border-navy-700 text-navy-900' 
               : 'border-transparent text-ink-500 hover:text-ink-800'
           }`}
         >
           <TrendingUp className="h-4 w-4" /> Vista Operativa (Administración y Caja)
+        </button>
+        <button
+          onClick={() => setActiveTab('consolidado')}
+          className={`pb-3 font-semibold text-sm flex items-center gap-2 border-b-2 transition whitespace-nowrap ${
+            activeTab === 'consolidado' 
+              ? 'border-navy-700 text-navy-900' 
+              : 'border-transparent text-ink-500 hover:text-ink-800'
+          }`}
+        >
+          <Filter className="h-4 w-4" /> Consolidado de Ingresos (Filtros)
         </button>
       </div>
 
@@ -296,7 +337,6 @@ export default function ReportsView({ students, scholarships, transactions, push
             </button>
           </div>
 
-          {/* Tarjetas KPI Superiores */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="card p-5 border-l-4 border-l-navy-600 space-y-1">
               <div className="flex items-center justify-between text-ink-500 text-xs font-bold uppercase">
@@ -335,9 +375,7 @@ export default function ReportsView({ students, scholarships, transactions, push
             </div>
           </div>
 
-          {/* Gráficos / Tablas de Distribución */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Ingresos por Carrera */}
             <div className="card p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h4 className="font-bold text-ink-900 flex items-center gap-2">
@@ -363,7 +401,6 @@ export default function ReportsView({ students, scholarships, transactions, push
               </div>
             </div>
 
-            {/* Ingresos por Canal de Pago */}
             <div className="card p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h4 className="font-bold text-ink-900 flex items-center gap-2">
@@ -433,6 +470,102 @@ export default function ReportsView({ students, scholarships, transactions, push
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= VISTA CONSOLIDADO DE INGRESOS ================= */}
+      {activeTab === 'consolidado' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-ink-900">Consolidado de Ingresos y Arqueo</h3>
+              <p className="text-xs text-ink-500">Filtre las transacciones por rangos de fecha y canal de pago específico.</p>
+            </div>
+          </div>
+
+          {/* Filtros de Fecha y Canal */}
+          <div className="card p-4 grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 mb-1">Fecha Inicio</label>
+              <input 
+                type="date" 
+                className="input text-xs"
+                value={fechaInicio}
+                onChange={(e) => setFechaInicio(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 mb-1">Fecha Fin</label>
+              <input 
+                type="date" 
+                className="input text-xs"
+                value={fechaFin}
+                onChange={(e) => setFechaFin(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 mb-1">Canal de Pago</label>
+              <select 
+                className="input text-xs"
+                value={canalFilter}
+                onChange={(e) => setCanalFilter(e.target.value)}
+              >
+                <option value="all">Todos los canales</option>
+                {ingresosPorCanal.map(([canal]) => (
+                  <option key={canal} value={canal}>{canal}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Resumen Total Filtrado */}
+          <div className="card p-5 bg-navy-900 text-white flex justify-between items-center">
+            <div>
+              <p className="text-xs text-navy-200 uppercase font-bold">Total Recaudado en el Filtro</p>
+              <p className="text-2xl font-black mt-1">Bs {formatBs(totalConsolidadoFiltrado)}</p>
+            </div>
+            <div className="text-right">
+              <span className="badge-navy">{transactionsConsolidado.length} transacciones encontradas</span>
+            </div>
+          </div>
+
+          {/* Tabla Detallada Consolidada */}
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head">Concepto</th>
+                    <th className="table-head">Canal</th>
+                    <th className="table-head">Estado</th>
+                    <th className="table-head text-right">Monto (Bs)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {transactionsConsolidado.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-6 text-xs text-ink-400">No se encontraron transacciones con los filtros seleccionados.</td>
+                    </tr>
+                  ) : (
+                    transactionsConsolidado.map((t) => (
+                      <tr key={t.id} className="hover:bg-ink-50">
+                        <td className="table-cell text-xs">{formatDate(t.fecha)}</td>
+                        <td className="table-cell font-medium text-ink-900">{t.concepto}</td>
+                        <td className="table-cell text-xs"><span className="badge-gray">{t.canal || 'No especificado'}</span></td>
+                        <td className="table-cell text-xs">
+                          <span className={t.estado === 'APROBADO' || t.estado === 'CONCILIADO' ? 'text-emerald-600 font-bold' : 'text-amber-600'}>
+                            {t.estado}
+                          </span>
+                        </td>
+                        <td className="table-cell text-right font-bold text-navy-800">Bs {formatBs(Number(t.monto) || 0)}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
