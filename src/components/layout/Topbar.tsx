@@ -1,4 +1,4 @@
-import { Search, Bell, ChevronDown, Calendar } from 'lucide-react';
+import { Search, Bell, ChevronDown, Calendar, Key } from 'lucide-react';
 
 interface TopbarProps {
   title: string;
@@ -11,6 +11,7 @@ interface TopbarProps {
     tipo_usuario: string;
     rol?: string | null;
   };
+  onOpenChangePassword?: () => void;
 }
 
 export default function Topbar({ 
@@ -18,7 +19,8 @@ export default function Topbar({
   subtitle, 
   searchPlaceholder = 'Buscar estudiantes, pagos, comprobantes…', 
   onSearch,
-  userProfile 
+  userProfile,
+  onOpenChangePassword
 }: TopbarProps) {
   const today = new Date().toLocaleDateString('es-BO', {
     weekday: 'long',
@@ -27,12 +29,10 @@ export default function Topbar({
     year: 'numeric',
   });
 
-  // Extraer iniciales para el avatar de forma segura
   const nombres = userProfile?.nombres || 'Usuario';
   const apellidos = userProfile?.apellidos || '';
   const iniciales = `${nombres.charAt(0)}${apellidos.charAt(0)}`.toUpperCase();
 
-  // Formatear el rol o tipo de usuario para mostrarlo ordenado
   const rolTexto = userProfile?.rol 
     ? `${userProfile.rol.charAt(0) + userProfile.rol.slice(1).toLowerCase()}` 
     : (userProfile?.tipo_usuario || 'Administrador');
@@ -46,8 +46,6 @@ export default function Topbar({
         </div>
 
         <div className="flex items-center gap-3">
-          
-
           <div className="hidden lg:flex items-center gap-2 rounded-lg bg-ink-50 border border-ink-200 px-3 py-2 text-sm text-ink-600">
             <Calendar className="h-4 w-4 text-ink-400" />
             <span className="capitalize">{today}</span>
@@ -58,19 +56,35 @@ export default function Topbar({
             <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           </button>
 
-          <div className="flex items-center gap-2.5 rounded-lg border border-ink-200 px-2.5 py-1.5 hover:bg-ink-50 transition cursor-pointer">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0A2463] text-white text-sm font-bold">
+          <div className="flex items-center gap-2.5 rounded-lg border border-ink-200 px-2.5 py-1.5 hover:bg-ink-50 transition">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0A2463] text-white text-sm font-bold shrink-0">
               {iniciales}
             </div>
+            
             <div className="hidden md:block text-left">
               <p className="text-sm font-semibold text-ink-800 leading-tight">
                 {nombres} {apellidos}
               </p>
-              <p className="text-xs text-ink-500 leading-tight capitalize">
+              <p className="text-xs text-ink-500 leading-tight capitalize mt-0.5">
                 {rolTexto} {userProfile?.tipo_usuario ? `(${userProfile.tipo_usuario.toLowerCase()})` : ''}
               </p>
             </div>
-            <ChevronDown className="h-4 w-4 text-ink-400" />
+
+            {/* Botón de cambio de contraseña independiente y siempre visible */}
+            {onOpenChangePassword && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation(); // Evita conflictos con otros clics del contenedor
+                  onOpenChangePassword();
+                }}
+                className="ml-1 p-2 text-ink-400 hover:text-[#0A2463] hover:bg-ink-100 rounded-lg transition"
+                title="Cambiar mi contraseña"
+              >
+                <Key className="h-4 w-4" />
+              </button>
+            )}
+
+            <ChevronDown className="h-4 w-4 text-ink-400 shrink-0 hidden md:block" />
           </div>
         </div>
       </div>

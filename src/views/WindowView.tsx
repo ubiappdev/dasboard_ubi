@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   Search, Landmark, QrCode, Banknote, ArrowRightLeft,
-  Receipt, UploadCloud, Loader2, X, CheckCircle2, Camera, Sparkles, PlusCircle, Eye, AlertCircle
+  Receipt, UploadCloud, Loader2, X, CheckCircle2, Camera, Sparkles, PlusCircle, Eye, AlertCircle,
+  FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import type { ToastPush, PaymentChannel } from '@/types';
 import { formatBs, formatDateTime } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -76,6 +78,9 @@ export default function WindowView({ pushToast }: WindowViewProps) {
   
   // Estado para el modal de vista ampliada ("Ojito") de la imagen
   const [modalImagePreview, setModalImagePreview] = useState<string | null>(null);
+
+  // Estado para el botón de exportación a Excel
+  const [exportingExcel, setExportingExcel] = useState(false);
 
 
   useEffect(() => {
@@ -424,6 +429,69 @@ export default function WindowView({ pushToast }: WindowViewProps) {
     }
   };
 
+  // ── Exportar a Excel (pestaña "Gestión de Recibos") ──────────────────────
+  // Genera un .xlsx real (SheetJS) tomando como base el JSON `recibo_data`
+  // guardado en cada fila de `cajas_recibos`. Las columnas se arman a partir
+  // de las claves que trae ese JSON (numero_recibo, monto_total, ci_detectado,
+  // fecha_emision, concepto_cobro, nombres_estudiante, apellidos_estudiante,
+  // confianza), con fallback a las columnas planas de la tabla cuando el
+  // recibo no tiene `recibo_data` (p. ej. recibos antiguos o unitarios).
+  const exportarRecibosAExcel = () => {
+    if (cajasRecibos.length === 0) {
+      pushToast('error', 'No hay recibos para exportar.');
+      return;
+    }
+    try {
+      setExportingExcel(true);
+
+      const filas = cajasRecibos.map((r) => {
+        const data = r.recibo_data || {};
+        const nombreAlumno = [r.alumnos?.nombres, r.alumnos?.apellidos].filter(Boolean).join(' ');
+        return {
+          'N° Recibo': data.numero_recibo ?? r.numero_recibo ?? '',
+          'Nombres Estudiante': data.nombres_estudiante ?? r.alumnos?.nombres ?? '',
+          'Apellidos Estudiante': data.apellidos_estudiante ?? r.alumnos?.apellidos ?? '',
+          'Estudiante (Sistema)': nombreAlumno || 'Sin asociar',
+          'CI Detectado': data.ci_detectado ?? r.alumnos?.ci ?? '',
+          'Concepto Cobro': data.concepto_cobro ?? r.concepto_cobro ?? '',
+          'Monto Total (Bs)': Number(data.monto_total ?? r.monto_total ?? 0),
+          'Fecha Emisión': data.fecha_emision ?? r.fecha_emision ?? '',
+          'Confianza IA': data.confianza ?? '',
+          'Estado': r.alumno_id ? 'Conciliado' : 'Pendiente vínculo',
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(filas);
+
+      // Ancho de columnas para que el archivo se vea prolijo al abrirlo
+      worksheet['!cols'] = [
+        { wch: 14 }, // N° Recibo
+        { wch: 22 }, // Nombres Estudiante
+        { wch: 22 }, // Apellidos Estudiante
+        { wch: 26 }, // Estudiante (Sistema)
+        { wch: 16 }, // CI Detectado
+        { wch: 28 }, // Concepto Cobro
+        { wch: 16 }, // Monto Total
+        { wch: 14 }, // Fecha Emisión
+        { wch: 12 }, // Confianza IA
+        { wch: 18 }, // Estado
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Recibos');
+
+      const fechaArchivo = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `recibos_caja_${fechaArchivo}.xlsx`);
+
+      pushToast('success', `Se exportaron ${filas.length} recibos a Excel.`);
+    } catch (error: any) {
+      console.error('Error exportando a Excel:', error);
+      pushToast('error', error?.message || 'No se pudo generar el archivo Excel.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -466,12 +534,23 @@ export default function WindowView({ pushToast }: WindowViewProps) {
                 Historial de recibos emitidos. Los recibos de carga masiva aparecen "Sin asociar" hasta el paso de conciliación.
               </p>
             </div>
-            <button
-              onClick={() => { setShowBatchModal(true); setBatchStep(1); setBatchFiles([]); setBatchResults([]); setLinkingRecibo(null); setPaymentCandidates([]); }}
-              className="btn-primary flex items-center gap-2 text-xs font-semibold"
-            >
-              <PlusCircle className="h-4 w-4" /> Subida Masiva de Recibos (IA)
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportarRecibosAExcel}
+                className="btn-secondary flex items-center gap-2 text-xs font-semibold"
+                disabled={exportingExcel || loading || cajasRecibos.length === 0}
+                title="Exportar los recibos (recibo_data) a un archivo Excel"
+              >
+                {exportingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                Exportar a Excel
+              </button>
+              <button
+                onClick={() => { setShowBatchModal(true); setBatchStep(1); setBatchFiles([]); setBatchResults([]); setLinkingRecibo(null); setPaymentCandidates([]); }}
+                className="btn-primary flex items-center gap-2 text-xs font-semibold"
+              >
+                <PlusCircle className="h-4 w-4" /> Subida Masiva de Recibos (IA)
+              </button>
+            </div>
           </div>
           <div className="card">
             <div className="overflow-x-auto">

@@ -647,7 +647,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
                 <th className="table-head">Curso</th>
                 <th className="table-head">Turno</th>
                 <th className="table-head">Beca</th>
-                <th className="table-head">Estado</th>
                 <th className="table-head text-right">Historial</th>
               </tr>
             </thead>
@@ -669,7 +668,6 @@ export default function StudentsView({ students, scholarships, transactions, pus
                     <td className="table-cell">{student.curso}</td>
                     <td className="table-cell">{student.turno}</td>
                     <td className="table-cell">{scholarship ? <span className="badge-navy"><Award className="h-3 w-3" /> {scholarship.nombre}</span> : '—'}</td>
-                    <td className="table-cell">{student.estadoFinanciero === 'AL DIA' ? <span className="badge-green">Al día</span> : <span className="badge-red">Pendiente</span>}</td>
                     <td className="table-cell text-right">
                       <button className="btn-secondary" onClick={() => setSelectedStudent(student)}>
                         <History className="h-4 w-4" /> Ver pagos
